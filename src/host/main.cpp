@@ -1,6 +1,9 @@
 #include <stdio.h>
+#include <string.h>
 #include "core/canvas.h"
-#include "core/font.h"
+#include "core/crt.h"
+#include "core/fixture.h"
+#include "core/screen.h"
 #include "core/types.h"
 #include "host/png.h"
 
@@ -8,25 +11,21 @@
 // supplies its own main() via Unity -- keep this one out of that build.
 #ifndef PIO_UNIT_TESTING
 static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];
+static uint8_t g_ring[9 * cb::SCREEN_W];
 
 int main(int, char**) {
+    memset(g_buf, 0, sizeof g_buf);
     cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
-    c.clear(0);
 
-    // An intensity ramp, so the palette curve is visible.
-    for (int x = 0; x < cb::SCREEN_W; x++)
-        c.fill(x, 200, 1, 30, uint8_t(x * 255 / (cb::SCREEN_W - 1)));
+    const cb::EffectParams fx = cb::EffectParams::defaults();
+    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
+    cb::post_process(c, fx, 0, g_ring, sizeof g_ring);
 
-    c.rect(4, 4, cb::SCREEN_W - 8, cb::SCREEN_H - 8, 120);
-    cb::draw_text(c, 12, 20, "CLAUDEBOY 3000", 255, 2);
-    cb::draw_text(c, 12, 48, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 200, 1);
-    cb::draw_text(c, 12, 60, "0123456789 %.:-/", 200, 1);
-
-    if (!cbhost::write_png_from_canvas("out/smoke.png", c)) {
+    if (!cbhost::write_png_from_canvas("out/ambient.png", c)) {
         fprintf(stderr, "write failed -- does out/ exist?\n");
         return 1;
     }
-    printf("wrote out/smoke.png\n");
+    printf("wrote out/ambient.png\n");
     return 0;
 }
 #endif  // PIO_UNIT_TESTING

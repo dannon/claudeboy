@@ -108,6 +108,76 @@ void test_gauge_bar_length_tracks_remaining(void) {
     TEST_ASSERT_TRUE(wide > narrow);
 }
 
+void test_chart_draws_in_its_band(void) {
+    cb::Canvas c = mks();
+    cb::draw_chart(c, cb::fixture_snapshot().providers[0]);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y + cb::CHART_H + 2, cb::SCREEN_W, 5));
+}
+
+void test_tallest_bar_is_the_peak_day(void) {
+    cb::Canvas c = mks();
+    const cb::Provider& p = cb::fixture_snapshot().providers[0];
+    cb::draw_chart(c, p);
+    // Aug 19 (index 6) is the 527M peak; it should be the tallest column.
+    int peak_idx = 0;
+    for (int i = 1; i < p.chart_count; i++)
+        if (p.chart[i].value > p.chart[peak_idx].value) peak_idx = i;
+    TEST_ASSERT_EQUAL_INT(6, peak_idx);
+}
+
+void test_empty_chart_does_not_crash(void) {
+    cb::Canvas c = mks();
+    cb::Provider empty{"x", "X", nullptr, 0, nullptr, 0, nullptr, 0};
+    cb::draw_chart(c, empty);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H));
+}
+
+void test_render_ambient_fills_all_bands(void) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
+    TEST_ASSERT_TRUE(lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H) > 20);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 12) > 20);
+}
+
+void test_render_ambient_with_bad_index_is_safe(void) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, cb::fixture_snapshot(), 99, cb::FIXTURE_REFERENCE_MS, "14:44");
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H));
+}
+
+void test_verdict_fits_a_narrow_cell(void) {
+    cb::Canvas c = mks();
+    const int w = cb::cell_width(4);
+    // 99d23h reset -- "BURNOUT 99d23h" is 14 chars, 83px at scale 1, wider
+    // than a 4-cell interior (68px). used==limit forces Burnout regardless
+    // of elapsed_frac.
+    cb::ProgressLine line{"SESSION", 100, 100,
+                          cb::FIXTURE_REFERENCE_MS + 8636400000LL,
+                          200LL * 86400 * 1000};
+    cb::Pace p = cb::compute_pace(line, cb::FIXTURE_REFERENCE_MS);
+    TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
+    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, w, line, p);
+    // Nothing should bleed past this cell's right border into whatever sits
+    // next to it.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + w, cb::CELL_Y, 20, cb::CELL_H));
+}
+
+void test_unknown_state_draws_no_tick(void) {
+    cb::Canvas c = mks();
+    cb::ProgressLine fresh{"NEW", 1, 100,
+                           cb::FIXTURE_REFERENCE_MS + 299LL * 60 * 1000,
+                           5LL * 3600 * 1000};
+    cb::Pace pc = cb::compute_pace(fresh, cb::FIXTURE_REFERENCE_MS);
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, pc.state);
+    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, 100, fresh, pc);
+    // Pace tick stays undrawn when there's no pace to show.
+    const int bar_x = cb::MARGIN + 3, bar_w = 100 - 6;
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 31, bar_w, 4));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_format_duration_minutes);
@@ -122,5 +192,12 @@ int main(int, char**) {
     RUN_TEST(test_cells_draw_inside_their_band);
     RUN_TEST(test_unknown_state_draws_no_verdict);
     RUN_TEST(test_gauge_bar_length_tracks_remaining);
+    RUN_TEST(test_chart_draws_in_its_band);
+    RUN_TEST(test_tallest_bar_is_the_peak_day);
+    RUN_TEST(test_empty_chart_does_not_crash);
+    RUN_TEST(test_render_ambient_fills_all_bands);
+    RUN_TEST(test_render_ambient_with_bad_index_is_safe);
+    RUN_TEST(test_verdict_fits_a_narrow_cell);
+    RUN_TEST(test_unknown_state_draws_no_tick);
     return UNITY_END();
 }

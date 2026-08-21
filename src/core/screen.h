@@ -35,4 +35,8 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
                      const ProgressLine& line, const Pace& p);
 void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms);
 
+void draw_chart(Canvas& c, const Provider& prov);
+void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
+                    int64_t now_ms, const char* clock);
+
 }  // namespace cb

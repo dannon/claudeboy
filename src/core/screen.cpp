@@ -103,6 +103,10 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
         char dur[12];
         format_duration(p.reset_in_ms, dur, sizeof dur);
         snprintf(row, sizeof row, "%s %s", v, dur);
+        // A 4-cell layout is narrower than the verdict-plus-duration text can
+        // fit; drop the duration and keep the verdict, which is the part
+        // read at a glance.
+        if (text_width(row, 1) > w - 6) snprintf(row, sizeof row, "%s", v);
         draw_text(c, x + 3, y + 48, row, verdict_intensity(p.state), 1);
     }
 }
@@ -116,6 +120,48 @@ void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms) {
         const Pace p = compute_pace(prov.progress[i], now_ms);
         draw_gauge_cell(c, x, CELL_Y, w, prov.progress[i], p);
     }
+}
+
+void draw_chart(Canvas& c, const Provider& prov) {
+    const int n = prov.chart_count;
+    if (n <= 0 || !prov.chart) return;
+
+    const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
+    c.rect(x0, CHART_Y, w, CHART_H, I_RULE);
+    draw_text(c, x0 + 3, CHART_Y + 3, "DAILY CONSUMPTION - 30D", I_DIM, 1);
+
+    int64_t peak = 1;
+    for (int i = 0; i < n; i++) if (prov.chart[i].value > peak) peak = prov.chart[i].value;
+
+    const int plot_y = CHART_Y + 14;
+    const int plot_h = CHART_H - 18;
+    const int inner_w = w - 6;
+    const int gap = (n > 40) ? 0 : 1;
+    int bw = (inner_w - (n - 1) * gap) / n;
+    if (bw < 1) bw = 1;
+
+    for (int i = 0; i < n; i++) {
+        int bh = static_cast<int>((prov.chart[i].value * plot_h) / peak);
+        if (bh < 1 && prov.chart[i].value > 0) bh = 1;
+        const int bx = x0 + 3 + i * (bw + gap);
+        // The last point is today, still filling: draw it dim so it does not
+        // read as a finished day.
+        const uint8_t v = (i == n - 1) ? I_DIM : I_NORMAL;
+        if (bh > 0) c.fill(bx, plot_y + plot_h - bh, bw, bh, v);
+    }
+}
+
+void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
+                    int64_t now_ms, const char* clock) {
+    draw_tabs(c, snap, provider_index, clock);
+    if (provider_index < 0 || provider_index >= snap.provider_count) return;
+
+    const Provider& prov = snap.providers[provider_index];
+    draw_cells(c, prov, now_ms);
+    draw_chart(c, prov);
+
+    const char* left = prov.text_count > 0 ? prov.text[0].value : "";
+    draw_footer(c, left, "WORKING");
 }
 
 }  // namespace cb
