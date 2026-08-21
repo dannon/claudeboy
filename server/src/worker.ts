@@ -57,10 +57,6 @@ function methodNotAllowed(allow: string): Response {
 // KV holds whatever was last written to it, and a hand-edited or half-written
 // value is valid JSON of the wrong shape rather than a parse error. Nothing below
 // checks providers again, so this is the last place it can be caught.
-function hasProviders(u: unknown): u is PushBody {
-  return typeof u === 'object' && u !== null && Array.isArray((u as PushBody).providers);
-}
-
 function noSnapshot(): Response {
   return new Response(JSON.stringify({ error: 'no snapshot' }), {
     status: 503, headers: JSON_HEADERS,
@@ -110,11 +106,15 @@ async function handleSnapshot(request: Request, env: Env): Promise<Response> {
   }
   // Same reasoning one step later: 'null', '{}', '[]' and {"providers":"x"} all
   // parse cleanly and then throw further down, which would surface as a 500.
-  if (!hasProviders(parsed)) return noSnapshot();
+  // Run the same validator the push path uses rather than a shallower shape
+  // check -- an element-level guard is what catches {"providers":[null]}, which
+  // a top-level Array.isArray happily admits and shapeForClient then throws on.
+  const validated = validatePushBody(parsed);
+  if (!validated.ok) return noSnapshot();
 
   const snapshot: Snapshot = {
     serverTime: Math.floor(Date.now() / 1000),
-    providers: parsed.providers,
+    providers: validated.value.providers,
   };
   const client = new URL(request.url).searchParams.get('client');
   return new Response(JSON.stringify(shapeForClient(snapshot, client)), {

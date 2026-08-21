@@ -142,6 +142,26 @@ describe('GET /v1/snapshot', () => {
   // Valid JSON of the wrong shape used to reach the shaper and throw there, which
   // is a 500 -- a status neither client has a state for, unlike the 503 both
   // already render as "keep the last good snapshot".
+  // Element-level corruption, not just top-level. A guard that only checked
+  // Array.isArray(providers) admitted every one of these and then threw inside
+  // shapeForClient's .map -- the same 500 the top-level guard set out to remove.
+  it.each([
+    '{"providers":[null]}',
+    '{"providers":[1,2]}',
+    '{"providers":[{}]}',
+    '{"providers":[{"id":"claude"}]}',
+    '{"providers":[{"id":"c","displayName":"C","plan":"p","fetchedAt":1787319799,"progress":"no"}]}',
+  ])(
+    'degrades to 503 when a stored provider element is malformed: %s',
+    async (stored) => {
+      kv.store.set(KV_KEY, stored);
+      for (const q of ['', '?client=watch', '?client=cyd']) {
+        const r = await get('read-secret', q);
+        expect(r.status, `stored ${stored}${q}`).toBe(503);
+      }
+    },
+  );
+
   it.each(['null', '{}', '[]', '{"providers":"x"}'])(
     'degrades to 503 when the stored value is %s',
     async (stored) => {
