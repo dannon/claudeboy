@@ -107,6 +107,53 @@ void test_degenerate_canvas_is_inert(void) {
     }
 }
 
+#include "core/font.h"
+
+static uint8_t wide[64 * 16];
+static cb::Canvas mkwide() { memset(wide, 0, sizeof wide); return cb::Canvas(wide, 64, 16); }
+
+void test_text_width_advances_six_per_char(void) {
+    TEST_ASSERT_EQUAL_INT(0,  cb::text_width("", 1));
+    TEST_ASSERT_EQUAL_INT(5,  cb::text_width("A", 1));    // last glyph has no trailing gap
+    TEST_ASSERT_EQUAL_INT(11, cb::text_width("AB", 1));
+    TEST_ASSERT_EQUAL_INT(22, cb::text_width("AB", 2));
+}
+
+void test_draw_char_marks_pixels(void) {
+    cb::Canvas c = mkwide();
+    cb::draw_char(c, 0, 0, 'A', 255, 1);
+    int lit = 0;
+    for (int y = 0; y < 7; y++)
+        for (int x = 0; x < 5; x++)
+            if (c.at(x, y)) lit++;
+    TEST_ASSERT_TRUE(lit > 4);       // 'A' is not blank
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(5, 0));   // and stays inside its cell
+}
+
+void test_space_draws_nothing(void) {
+    cb::Canvas c = mkwide();
+    cb::draw_char(c, 0, 0, ' ', 255, 1);
+    for (int i = 0; i < 64 * 16; i++) TEST_ASSERT_EQUAL_UINT8(0, wide[i]);
+}
+
+void test_scale_two_doubles_each_pixel(void) {
+    cb::Canvas c1 = mkwide();
+    cb::draw_char(c1, 0, 0, 'L', 255, 1);
+    bool lit_at_1_1 = c1.at(0, 0) != 0;
+    cb::Canvas c2 = mkwide();
+    cb::draw_char(c2, 0, 0, 'L', 255, 2);
+    if (lit_at_1_1) {
+        TEST_ASSERT_EQUAL_UINT8(255, c2.at(0, 0));
+        TEST_ASSERT_EQUAL_UINT8(255, c2.at(1, 1));
+    }
+}
+
+void test_unprintable_char_is_skipped(void) {
+    cb::Canvas c = mkwide();
+    cb::draw_text(c, 0, 0, "\x01\x02", 255, 1);
+    for (int i = 0; i < 64 * 16; i++) TEST_ASSERT_EQUAL_UINT8(0, wide[i]);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_plot_and_read);
@@ -119,5 +166,10 @@ int main(int, char**) {
     RUN_TEST(test_clear);
     RUN_TEST(test_at_returns_zero_out_of_bounds);
     RUN_TEST(test_degenerate_canvas_is_inert);
+    RUN_TEST(test_text_width_advances_six_per_char);
+    RUN_TEST(test_draw_char_marks_pixels);
+    RUN_TEST(test_space_draws_nothing);
+    RUN_TEST(test_scale_two_doubles_each_pixel);
+    RUN_TEST(test_unprintable_char_is_skipped);
     return UNITY_END();
 }
