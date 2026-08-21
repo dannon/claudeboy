@@ -119,6 +119,30 @@ void test_bloom_never_darkens(void) {
     for (int x = 0; x < 32; x++) TEST_ASSERT_TRUE(c.at(x, 4) >= 120);
 }
 
+void test_bloom_reaches_the_top_row(void) {
+    cb::Canvas c = mkc();
+    c.plot(16, 0, 255);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.bloom_radius = 2; p.bloom_strength = 255;
+    uint8_t ring[9 * 32];
+    cb::apply_bloom(c, p, ring, sizeof ring);
+    TEST_ASSERT_TRUE(c.at(16, 0) >= 200);      // top row stays bright
+    TEST_ASSERT_TRUE(c.at(16, 1) > 0);          // blooms downward
+    TEST_ASSERT_TRUE(c.at(17, 0) > 0);          // and sideways
+}
+
+void test_bloom_reaches_the_bottom_row(void) {
+    cb::Canvas c = mkc();
+    c.plot(16, 15, 255);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.bloom_radius = 2; p.bloom_strength = 255;
+    uint8_t ring[9 * 32];
+    cb::apply_bloom(c, p, ring, sizeof ring);
+    TEST_ASSERT_TRUE(c.at(16, 15) >= 200);     // bottom row stays bright
+    TEST_ASSERT_TRUE(c.at(16, 14) > 0);         // blooms upward
+    TEST_ASSERT_TRUE(c.at(17, 15) > 0);         // and sideways
+}
+
 void test_bloom_with_undersized_ring_is_skipped(void) {
     cb::Canvas c = mkc();
     c.plot(16, 8, 255);
@@ -145,6 +169,8 @@ int main(int, char**) {
     RUN_TEST(test_bloom_spreads_a_point);
     RUN_TEST(test_bloom_radius_zero_is_a_noop);
     RUN_TEST(test_bloom_never_darkens);
+    RUN_TEST(test_bloom_reaches_the_top_row);
+    RUN_TEST(test_bloom_reaches_the_bottom_row);
     RUN_TEST(test_bloom_with_undersized_ring_is_skipped);
     return UNITY_END();
 }

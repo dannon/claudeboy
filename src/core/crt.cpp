@@ -58,6 +58,11 @@ void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_by
     const int taps = rows;
     uint8_t* buf = c.data();
 
+    // taps is only ever 1, 3, 5, 7 or 9 (radius 0..4), so a fixed-point
+    // reciprocal multiply replaces the runtime divide -- the Xtensa LX6
+    // has no hardware divider and this loop runs ~153,600 times/frame.
+    const uint32_t recip = (1u << 16) / static_cast<uint32_t>(taps);
+
     // Horizontally blur source row `sy` into ring slot `sy % rows`.
     auto load_row = [&](int sy) {
         uint8_t* dst = ring + static_cast<size_t>(sy % rows) * w;
@@ -70,7 +75,7 @@ void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_by
                 if (sx >= w) sx = w - 1;
                 acc += src[sx];
             }
-            dst[x] = static_cast<uint8_t>(acc / taps);
+            dst[x] = static_cast<uint8_t>(((acc * recip) + (1u << 15)) >> 16);
         }
     };
 
@@ -89,7 +94,7 @@ void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_by
                 if (sy >= h) sy = h - 1;
                 acc += ring[static_cast<size_t>(sy % rows) * w + x];
             }
-            const uint32_t blur = acc / taps;
+            const uint32_t blur = ((acc * recip) + (1u << 15)) >> 16;
             const uint32_t add = (blur * p.bloom_strength) / 255u;
             const uint32_t v = out[x] + add;
             out[x] = static_cast<uint8_t>(v > 255u ? 255u : v);
