@@ -1,0 +1,46 @@
+#pragma once
+#include <stdint.h>
+
+namespace cb {
+
+constexpr int SCREEN_W = 320;
+constexpr int SCREEN_H = 240;
+
+enum class PaceState : uint8_t { Surplus, OnPace, Burnout, Unknown };
+
+struct ProgressLine {
+    const char* label;
+    int32_t used;
+    int32_t limit;
+    int64_t resets_at_ms;
+    int64_t period_ms;
+};
+
+struct TextLine { const char* label; const char* value; };
+struct ChartPoint { const char* label; int64_t value; };
+
+struct Provider {
+    const char* id;
+    const char* display_name;
+    const ProgressLine* progress; int progress_count;
+    const TextLine* text;         int text_count;
+    const ChartPoint* chart;      int chart_count;
+};
+
+struct UsageSnapshot {
+    const Provider* providers; int provider_count;
+    int64_t server_time_ms;
+};
+
+struct Pace {
+    PaceState state;
+    float remaining_frac;
+    float elapsed_frac;
+    float ratio;
+    float projected_frac;
+    int64_t reset_in_ms;
+    int64_t burnout_early_ms;
+    bool valid;
+};
+
+}  // namespace cb
