@@ -8,6 +8,10 @@ const body = JSON.parse(
 );
 const snap: Snapshot = { serverTime: 1787319874, ...body };
 
+// Wire bytes, not UTF-16 code units: the BLE budget is bytes, and the payload
+// carries U+00B7 separators that cost two of them each.
+const encoded = (s: Snapshot) => new TextEncoder().encode(JSON.stringify(s)).length;
+
 describe('shapeForClient', () => {
   it('drops text and chart for the watch', () => {
     for (const p of shapeForClient(snap, 'watch').providers) {
@@ -21,6 +25,12 @@ describe('shapeForClient', () => {
     const claude = shapeForClient(snap, 'cyd').providers[0]!;
     expect(claude.text!.length).toBeGreaterThan(0);
     expect(claude.chart!.length).toBe(31);
+  });
+
+  it('matches the client name case-insensitively', () => {
+    const watch = shapeForClient(snap, 'watch');
+    expect(shapeForClient(snap, 'WATCH')).toEqual(watch);
+    expect(shapeForClient(snap, 'Watch')).toEqual(watch);
   });
 
   it('returns the full document for an absent or unknown client', () => {
@@ -45,17 +55,21 @@ describe('shapeForClient', () => {
 
   // The whole reason the watch variant exists. Garmin moves 400-800 bytes/s over
   // BLE and glance mode has ~28KB for the raw bytes AND the parsed Dictionary.
-  it('keeps the watch payload under 4096 bytes', () => {
-    const bytes = new TextEncoder().encode(
-      JSON.stringify(shapeForClient(snap, 'watch')),
-    ).length;
-    expect(bytes, `watch payload was ${bytes} bytes`).toBeLessThan(4096);
+  //
+  // Both halves are load-bearing. 4096 is the device constraint, but this
+  // fixture's untrimmed document already sits under it, so the bound alone stays
+  // green even if the trim degenerates to `return snapshot`. Comparing the two
+  // variants is what makes that a failure.
+  it('keeps the watch payload under 4096 bytes and under the cyd variant', () => {
+    const watch = encoded(shapeForClient(snap, 'watch'));
+    const cyd = encoded(shapeForClient(snap, 'cyd'));
+    expect(watch, `watch payload was ${watch} bytes`).toBeLessThan(4096);
+    expect(watch, `watch was ${watch} bytes, cyd ${cyd}`).toBeLessThan(cyd);
   });
 
   it('shows the watch variant is dramatically smaller than the full one', () => {
-    const enc = (s: Snapshot) => new TextEncoder().encode(JSON.stringify(s)).length;
-    expect(enc(shapeForClient(snap, 'watch'))).toBeLessThan(
-      enc(shapeForClient(snap, 'cyd')) / 2,
+    expect(encoded(shapeForClient(snap, 'watch'))).toBeLessThan(
+      encoded(shapeForClient(snap, 'cyd')) / 2,
     );
   });
 });

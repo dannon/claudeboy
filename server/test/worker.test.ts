@@ -139,6 +139,22 @@ describe('GET /v1/snapshot', () => {
     expect(await r.json()).toEqual({ error: 'no snapshot' });
   });
 
+  // Valid JSON of the wrong shape used to reach the shaper and throw there, which
+  // is a 500 -- a status neither client has a state for, unlike the 503 both
+  // already render as "keep the last good snapshot".
+  it.each(['null', '{}', '[]', '{"providers":"x"}'])(
+    'degrades to 503 when the stored value is %s',
+    async (stored) => {
+      kv.store.set(KV_KEY, stored);
+      const plain = await get('read-secret');
+      expect(plain.status, `stored ${stored}`).toBe(503);
+      expect(await plain.json()).toEqual({ error: 'no snapshot' });
+      // The watch path is the one that calls .map, so it has to be checked too.
+      const watch = await get('read-secret', '?client=watch');
+      expect(watch.status, `stored ${stored}, client=watch`).toBe(503);
+    },
+  );
+
   it('stamps serverTime from the Worker clock, not from the push', async () => {
     await push('push-secret', body);
     const before = Math.floor(Date.now() / 1000);
@@ -151,7 +167,13 @@ describe('GET /v1/snapshot', () => {
   it('shapes for the watch when asked', async () => {
     await push('push-secret', body);
     const snap = (await (await get('read-secret', '?client=watch')).json()) as any;
-    for (const p of snap.providers) expect('chart' in p).toBe(false);
+    for (const p of snap.providers) {
+      // Both, not just chart: dropping chart and keeping text is the cheaper
+      // regression and it still doubles what the watch has to pull over BLE.
+      expect('chart' in p).toBe(false);
+      expect('text' in p).toBe(false);
+      expect(p.progress.length).toBeGreaterThan(0);
+    }
   });
 
   it('returns the full document for client=cyd', async () => {
