@@ -75,7 +75,10 @@ void setup() {
     // contiguous 76,800-byte run, and the WiFi/TLS stacks fragment the heap
     // once they start, so a later allocation can fail while the free total
     // still looks comfortable.
-    g_buf = new uint8_t[BUF_BYTES];
+    // heap_caps_malloc, not new[]: this build has exceptions off, so a failed
+    // operator new aborts with a heap backtrace instead of returning null, and
+    // the FATAL line below would never print.
+    g_buf = (uint8_t*)heap_caps_malloc(BUF_BYTES, MALLOC_CAP_8BIT);
     if (!g_buf) {
         Serial.println("claudeboy: FATAL: framebuffer allocation failed");
         while (true) delay(1000);

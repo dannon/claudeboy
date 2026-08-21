@@ -31,6 +31,10 @@ struct FrameTiming {
 // Nothing is allocated here -- both canvases, and the bloom ring, belong to
 // the caller. If `out` is not the same size as `accum` the accumulator is
 // still advanced but `out` is left untouched, rather than writing past it.
+//
+// `out` is scratch for the duration of the call: this overload runs the row
+// stream below and lends it `out`'s last row to work in, so `out` only holds
+// the frame once the call returns, and it must not overlap `accum`.
 void render_frame(Canvas& accum, Canvas& out, const UsageSnapshot& snap, int provider_index,
                   int64_t now_ms, const char* clock, const EffectParams& fx,
                   uint32_t frame, uint8_t* ring, size_t ring_bytes,
