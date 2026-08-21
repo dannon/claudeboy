@@ -1,9 +1,10 @@
 #include "core/palette.h"
+#include "core/fastdiv.h"
 
 namespace cb {
 
 Rgb palette_rgb(uint8_t i) {
-    const uint32_t sq = (static_cast<uint32_t>(i) * i) / 255u;   // 0..255, squared falloff
+    const uint32_t sq = div255(static_cast<uint32_t>(i) * i);   // 0..255, squared falloff
     Rgb c;
     c.r = static_cast<uint8_t>((sq * 30u) / 100u);
     c.g = i;

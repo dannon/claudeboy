@@ -11,6 +11,23 @@
 static TFT_eSPI tft;
 
 static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];   // the one accumulator
+// Post-processing must never write back into the accumulator: bloom adds
+// light and the accumulator only loses ~18/frame to decay, so feeding
+// post-processed pixels back in runs bloom away to saturation frame over
+// frame while vignette compounds the opposite way. Post-process a copy
+// instead and push pixels from that copy -- do not "optimise" this away.
+//
+// This buffer is heap-allocated in setup(), NOT a second static array like
+// g_buf: this board's static .bss/.data DRAM segment (dram0_0_seg) is only
+// ~124,580 bytes and the Arduino/TFT_eSPI framework already statically
+// consumes ~102,612 of that (~83%), leaving ~21,968 bytes of static
+// headroom -- nowhere near the 76,800 bytes SCREEN_W*SCREEN_H needs. The
+// linker refuses to build a second static buffer that size ("region
+// `dram0_0_seg' overflowed by 54840 bytes"). Free HEAP (~270KB) is a
+// separate, much larger pool that a compile-time static array cannot draw
+// from, which is why a `static uint8_t g_shown[...]` does not fit even
+// though free heap looks comfortable. `new` here instead.
+static uint8_t* g_shown = nullptr;
 static uint8_t g_ring[9 * cb::SCREEN_W];
 static uint16_t g_line[cb::SCREEN_W];
 static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
@@ -32,6 +49,14 @@ void setup() {
 
     memset(g_buf, 0, sizeof g_buf);
     cb::palette_build_rgb565_table(g_palette);
+
+    g_shown = new uint8_t[cb::SCREEN_W * cb::SCREEN_H];
+    if (!g_shown) {
+        Serial.println("claudeboy: FATAL: g_shown heap allocation failed");
+        while (true) delay(1000);
+    }
+    memset(g_shown, 0, cb::SCREEN_W * cb::SCREEN_H);
+
     Serial.printf("claudeboy: after buffers, free heap %u bytes\n",
                   (unsigned)ESP.getFreeHeap());
 }
@@ -49,13 +74,16 @@ void loop() {
     cb::render_ambient(c, cb::fixture_snapshot(), 0, now, "--:--");
     const uint32_t t_render_end = micros();
 
-    cb::post_process(c, fx, g_frame, g_ring, sizeof g_ring);
+    // Post-process a copy of the accumulator, never the accumulator itself.
+    memcpy(g_shown, g_buf, sizeof g_buf);
+    cb::Canvas shown(g_shown, cb::SCREEN_W, cb::SCREEN_H);
+    cb::post_process(shown, fx, g_frame, g_ring, sizeof g_ring);
     const uint32_t t_post_end = micros();
 
     tft.startWrite();
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
     for (int y = 0; y < cb::SCREEN_H; y++) {
-        const uint8_t* row = g_buf + (size_t)y * cb::SCREEN_W;
+        const uint8_t* row = g_shown + (size_t)y * cb::SCREEN_W;
         for (int x = 0; x < cb::SCREEN_W; x++) g_line[x] = g_palette[row[x]];
         tft.pushPixels(g_line, cb::SCREEN_W);
     }

@@ -1,4 +1,5 @@
 #include "core/crt.h"
+#include "core/fastdiv.h"
 #include <cstddef>
 
 namespace cb {
@@ -39,7 +40,7 @@ void apply_gain(Canvas& c, uint8_t gain) {
     uint8_t* d = c.data();
     const size_t n = static_cast<size_t>(c.width()) * c.height();
     for (size_t i = 0; i < n; i++)
-        d[i] = static_cast<uint8_t>((static_cast<uint32_t>(d[i]) * gain) / 255u);
+        d[i] = static_cast<uint8_t>(div255(static_cast<uint32_t>(d[i]) * gain));
 }
 
 size_t bloom_ring_bytes(int radius, int width) {
@@ -110,7 +111,7 @@ void apply_scanlines(Canvas& c, const EffectParams& p) {
     for (int y = 1; y < h; y += 2) {
         uint8_t* row = d + static_cast<size_t>(y) * w;
         for (int x = 0; x < w; x++)
-            row[x] = static_cast<uint8_t>((static_cast<uint32_t>(row[x]) * keep) / 255u);
+            row[x] = static_cast<uint8_t>(div255(static_cast<uint32_t>(row[x]) * keep));
     }
 }
 
@@ -130,7 +131,7 @@ void apply_vignette(Canvas& c, const EffectParams& p) {
             const uint32_t cut = static_cast<uint32_t>(t * p.vignette_strength);
             const uint32_t keep = cut >= 255u ? 0u : 255u - cut;
             uint8_t& v = d[static_cast<size_t>(y) * w + x];
-            v = static_cast<uint8_t>((static_cast<uint32_t>(v) * keep) / 255u);
+            v = static_cast<uint8_t>(div255(static_cast<uint32_t>(v) * keep));
         }
     }
 }
