@@ -8,7 +8,13 @@ namespace cb {
 // phosphor brightens it rather than replacing it.
 class Canvas {
 public:
-    Canvas(uint8_t* buf, int w, int h) : buf_(buf), w_(w), h_(h) {}
+    Canvas(uint8_t* buf, int w, int h)
+        : buf_(buf),
+          w_((buf && w > 0 && h > 0) ? w : 0),
+          h_((buf && w > 0 && h > 0) ? h : 0) {
+        // No MMU on device: degrade to 0x0 on bad args to avoid silent buffer
+        // corruption from out-of-bounds writes. Zero dimensions make all ops no-ops.
+    }
 
     void clear(uint8_t v = 0);
     void decay(uint8_t amount);                     // saturating subtract

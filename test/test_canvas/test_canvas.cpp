@@ -75,6 +75,38 @@ void test_clear(void) {
     TEST_ASSERT_EQUAL_UINT8(0, c.at(8, 4));
 }
 
+void test_at_returns_zero_out_of_bounds(void) {
+    cb::Canvas c = mk();
+    c.plot(3, 2, 150);
+    TEST_ASSERT_EQUAL_UINT8(150, c.at(3, 2));
+    // Out-of-bounds coords must all return 0
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(-1, 0));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(0, -1));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(16, 0));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(0, 8));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(-5, -5));
+}
+
+void test_degenerate_canvas_is_inert(void) {
+    // Fill buffer with sentinel to detect any accidental writes
+    memset(buf, 0xAB, sizeof buf);
+    // Construct with negative width; must degrade to 0x0
+    cb::Canvas bad(buf, -4, 8);
+    TEST_ASSERT_EQUAL_INT(0, bad.width());
+    TEST_ASSERT_EQUAL_INT(0, bad.height());
+    TEST_ASSERT_EQUAL_UINT8(0, bad.at(0, 0));
+    // All operations must be no-ops on a 0x0 canvas
+    bad.clear(255);
+    bad.decay(10);
+    bad.plot(0, 0, 255);
+    bad.fill(0, 0, 100, 100, 255);
+    bad.rect(0, 0, 50, 50, 255);
+    // Buffer must be completely untouched
+    for (int i = 0; i < 16 * 8; i++) {
+        TEST_ASSERT_EQUAL_UINT8(0xAB, buf[i]);
+    }
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_plot_and_read);
@@ -85,5 +117,7 @@ int main(int, char**) {
     RUN_TEST(test_rect_is_outline_only);
     RUN_TEST(test_fill_is_solid_and_clipped);
     RUN_TEST(test_clear);
+    RUN_TEST(test_at_returns_zero_out_of_bounds);
+    RUN_TEST(test_degenerate_canvas_is_inert);
     return UNITY_END();
 }
