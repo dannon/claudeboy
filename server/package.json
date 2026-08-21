@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
     "dev": "wrangler dev",
     "agent": "node --experimental-strip-types src/agent.ts"
   },

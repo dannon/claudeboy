@@ -1,0 +1,14 @@
+{
+  // The tests read their fixtures off disk, so they need node:fs and
+  // import.meta.url. They live in their own project so those types never reach
+  // the Worker source -- see ../tsconfig.json.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // @types/node is pinned to ^22 because of this pairing: 26 declares the
+    // URLSearchParams iterators with Symbol.dispose, which no longer matches the
+    // URL that @cloudflare/workers-types installs globally, and
+    // readFileSync(new URL(...)) stops typechecking. ^22 is the node we run.
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "include": ["**/*.ts", "../src/**/*.ts"]
+}

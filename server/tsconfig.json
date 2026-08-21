@@ -4,12 +4,17 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "node"],
+    // Worker source only -- the tests take their node types from
+    // test/tsconfig.json instead. Keeping node out of here is what stops a
+    // `node:` import from resolving in Worker code. It does not stop `process`
+    // or `Buffer`: workers-types declares both as `any` on the assumption that
+    // nodejs_compat may be on, so the typechecker cannot catch those for us.
+    "types": ["@cloudflare/workers-types"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }
