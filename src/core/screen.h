@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "core/canvas.h"
 #include "core/font.h"
+#include "core/pace.h"
 #include "core/types.h"
 
 namespace cb {
@@ -28,5 +29,10 @@ void format_duration(int64_t ms, char* out, size_t n);
 
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock);
 void draw_footer(Canvas& c, const char* left, const char* right);
+
+int cell_width(int count);
+void draw_gauge_cell(Canvas& c, int x, int y, int w,
+                     const ProgressLine& line, const Pace& p);
+void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms);
 
 }  // namespace cb
