@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { pollOnce, type AgentConfig, type AgentState } from '../src/agent.ts';
+import {
+  intervalMsFromEnv,
+  pollOnce,
+  type AgentConfig,
+  type AgentState,
+} from '../src/agent.ts';
 
 const rawUsage = readFileSync(
   new URL('../fixtures/openusage-20260821.json', import.meta.url), 'utf8');
@@ -37,6 +42,11 @@ beforeEach(() => {
   pushes = [];
   state = { lastPushedJson: null };
 });
+
+// What AbortSignal.timeout rejects with once the deadline passes.
+function timedOut(): Error {
+  return new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+}
 
 describe('pollOnce', () => {
   it('pushes a transformed snapshot on the first successful poll', async () => {
@@ -89,6 +99,50 @@ describe('pollOnce', () => {
     expect(pushes).toHaveLength(1);
   });
 
+  it('logs the pushed size in wire bytes, not UTF-16 code units', async () => {
+    const logged: string[] = [];
+    await pollOnce(makeConfig({ log: (m) => logged.push(m) }), state);
+    const json = pushes[0]!.body;
+    const bytes = new TextEncoder().encode(json).length;
+    // The fixture's text values carry U+00B7 separators, so the two counts differ
+    // -- which is the only reason this assertion says anything at all.
+    expect(bytes).toBeGreaterThan(json.length);
+    expect(logged.join('\n')).toContain(`(${bytes} bytes)`);
+  });
+
+  it('passes an abort signal to both fetches so neither can hang the loop', async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const cfg = makeConfig({});
+    cfg.fetchImpl = async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      signals.push(init?.signal);
+      if (url.includes('/v1/usage')) return new Response(rawUsage, { status: 200 });
+      return new Response(null, { status: 204 });
+    };
+    expect(await pollOnce(cfg, state)).toBe('pushed');
+    expect(signals).toHaveLength(2);
+    for (const signal of signals) expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('treats a usage fetch that times out as unavailable', async () => {
+    const outcome = await pollOnce(
+      makeConfig({ usageResponse: () => { throw timedOut(); } }), state);
+    expect(outcome).toBe('source-unavailable');
+    expect(pushes).toHaveLength(0);
+  });
+
+  it('treats a push that times out as push-failed, and retries next poll', async () => {
+    const cfg = makeConfig({});
+    cfg.fetchImpl = async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/v1/usage')) return new Response(rawUsage, { status: 200 });
+      throw timedOut();
+    };
+    expect(await pollOnce(cfg, state)).toBe('push-failed');
+    expect(state.lastPushedJson).toBeNull();
+    expect(await pollOnce(makeConfig({}), state)).toBe('pushed');
+  });
+
   it('does not remember a push that failed, so the next poll retries it', async () => {
     const cfg = makeConfig({});
     cfg.fetchImpl = async (input) => {
@@ -100,4 +154,34 @@ describe('pollOnce', () => {
     expect(state.lastPushedJson).toBeNull();
     expect(await pollOnce(makeConfig({}), state)).toBe('pushed');
   });
+});
+
+describe('intervalMsFromEnv', () => {
+  let logged: string[];
+  const log = (m: string) => logged.push(m);
+
+  beforeEach(() => { logged = []; });
+
+  it('defaults to 60s when the variable is not set at all', () => {
+    expect(intervalMsFromEnv(undefined, log)).toBe(60_000);
+    expect(logged).toEqual([]);
+  });
+
+  it('takes a usable value', () => {
+    expect(intervalMsFromEnv('120', log)).toBe(120_000);
+    expect(intervalMsFromEnv('5', log)).toBe(5_000);
+    expect(logged).toEqual([]);
+  });
+
+  // '', '   ', 'sixty', '0' and '-30' all come out of Number() as zero or NaN,
+  // and setTimeout treats both as fire-immediately -- a spin, not a slow poll.
+  // '1' parses fine and is just below the floor.
+  it.each(['', '   ', 'sixty', '0', '-30', '1', 'NaN', 'Infinity'])(
+    'falls back loudly on %o',
+    (raw) => {
+      expect(intervalMsFromEnv(raw, log)).toBe(60_000);
+      expect(logged).toHaveLength(1);
+      expect(logged[0]).toContain('CLAUDEBOY_INTERVAL_SEC');
+    },
+  );
 });

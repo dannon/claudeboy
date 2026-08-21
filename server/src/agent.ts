@@ -16,6 +16,42 @@ export interface AgentState {
   lastPushedJson: string | null;
 }
 
+// Neither fetch has a natural deadline. An OpenUsage that accepts the connection
+// and then never answers would otherwise hold the loop until undici's 300s
+// headersTimeout -- five poll intervals of silence with no log line to explain
+// them. Ten seconds is generous for a localhost read and for a Worker PUT.
+const FETCH_TIMEOUT_MS = 10_000;
+
+const DEFAULT_INTERVAL_SEC = 60;
+
+// OpenUsage caches for about five minutes, so polling faster than this buys
+// nothing and just burns KV write budget on the far side.
+const MIN_INTERVAL_SEC = 5;
+
+/**
+ * Poll interval from the environment, in milliseconds.
+ *
+ * Number('') is 0 and Number('nonsense') is NaN, and setTimeout treats both as
+ * zero -- so a typo in the plist turns the poll loop into a spin against
+ * OpenUsage and the Worker. Anything unusable falls back to the default, loudly:
+ * a silent fallback is how you end up debugging the wrong thing.
+ */
+export function intervalMsFromEnv(
+  raw: string | undefined,
+  log: (message: string) => void,
+): number {
+  if (raw === undefined) return DEFAULT_INTERVAL_SEC * 1000;
+  const sec = Number(raw);
+  if (!Number.isFinite(sec) || sec < MIN_INTERVAL_SEC) {
+    log(
+      `CLAUDEBOY_INTERVAL_SEC=${JSON.stringify(raw)} is not a usable interval ` +
+        `(want a number of at least ${MIN_INTERVAL_SEC}); falling back to ${DEFAULT_INTERVAL_SEC}s`,
+    );
+    return DEFAULT_INTERVAL_SEC * 1000;
+  }
+  return Math.round(sec * 1000);
+}
+
 /**
  * One poll cycle: read OpenUsage, transform, push if it changed.
  *
@@ -33,7 +69,9 @@ export async function pollOnce(
 
   let raw: unknown;
   try {
-    const response = await doFetch(config.usageUrl);
+    const response = await doFetch(config.usageUrl, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (!response.ok) {
       log(`openusage returned ${response.status}; keeping the last snapshot`);
       return 'source-unavailable';
@@ -63,6 +101,7 @@ export async function pollOnce(
         'content-type': 'application/json',
       },
       body: json,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       log(`push failed with ${response.status}; will retry next poll`);
@@ -75,7 +114,11 @@ export async function pollOnce(
 
   // Only remember it after the push actually landed, so a failure retries.
   state.lastPushedJson = json;
-  log(`pushed ${body.providers.length} providers (${json.length} bytes)`);
+  // Encoded length, not json.length: the whole design turns on byte counts
+  // against a 400-800 B/s link, and the U+00B7 separators OpenUsage puts in its
+  // text values cost two bytes each while counting as one UTF-16 code unit.
+  const bytes = new TextEncoder().encode(json).length;
+  log(`pushed ${body.providers.length} providers (${bytes} bytes)`);
   return 'pushed';
 }
 
@@ -95,7 +138,7 @@ async function main(): Promise<void> {
     pushToken: requireEnv('CLAUDEBOY_PUSH_TOKEN'),
     log: (m) => console.log(`[${new Date().toISOString()}] ${m}`),
   };
-  const intervalMs = Number(process.env['CLAUDEBOY_INTERVAL_SEC'] ?? 60) * 1000;
+  const intervalMs = intervalMsFromEnv(process.env['CLAUDEBOY_INTERVAL_SEC'], config.log!);
   const state: AgentState = { lastPushedJson: null };
 
   config.log!(`claudeboy agent starting, polling every ${intervalMs / 1000}s`);
