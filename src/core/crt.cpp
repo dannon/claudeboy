@@ -18,8 +18,8 @@ EffectParams EffectParams::defaults() {
     EffectParams p;
     p.decay = 18;
     p.bloom_radius = 2;
-    p.bloom_strength = 90;
-    p.scanline_depth = 50;      // ~20%, per the spec's "start subtle"
+    p.bloom_strength = 240;
+    p.scanline_depth = 84;      // strong end of sweep, chosen from contact sheets
     p.vignette_strength = 120;
     p.flicker_amount = 6;
     return p;
