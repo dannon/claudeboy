@@ -21,6 +21,9 @@ static uint8_t streamed_buf[cb::SCREEN_W * cb::SCREEN_H];
 static uint8_t ring[9 * cb::SCREEN_W];
 static uint8_t out_row[cb::SCREEN_W];
 
+// Named in failure messages so a mismatch says which input produced it.
+static const char* canvas_name = "fixture";
+
 struct SinkState {
     uint8_t* dst;
     int calls;
@@ -42,9 +45,33 @@ static void draw_fixture(void) {
     memset(pristine_buf, 0, N);
     cb::Canvas c(pristine_buf, cb::SCREEN_W, cb::SCREEN_H);
     cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
+    canvas_name = "fixture";
 }
 
-// Returns 0 on agreement, otherwise fails the test with the offending params.
+static uint8_t edge_value(int x, int y) {
+    return static_cast<uint8_t>(64 + ((x * 7 + y * 13) % 192));
+}
+
+// The fixture screen's outermost rows and columns are entirely blank, so every
+// clamped bloom tap reads zero and all four edge-clamp branches agree no matter
+// what they clamp to. Lighting the border with values that vary along it makes
+// those branches observable -- and the top and bottom clamps are exactly the
+// ring warm-up and drain cases a streaming rewrite is most likely to seam.
+static void draw_fixture_with_lit_edges(void) {
+    draw_fixture();
+    cb::Canvas c(pristine_buf, cb::SCREEN_W, cb::SCREEN_H);
+    for (int x = 0; x < cb::SCREEN_W; x++) {
+        c.plot(x, 0, edge_value(x, 0));
+        c.plot(x, cb::SCREEN_H - 1, edge_value(x, cb::SCREEN_H - 1));
+    }
+    for (int y = 0; y < cb::SCREEN_H; y++) {
+        c.plot(0, y, edge_value(0, y));
+        c.plot(cb::SCREEN_W - 1, y, edge_value(cb::SCREEN_W - 1, y));
+    }
+    canvas_name = "lit edges";
+}
+
+// Fails the test with the offending params on any disagreement.
 static void check_equivalence(const cb::EffectParams& p, uint32_t frame) {
     memcpy(reference_buf, pristine_buf, N);
     cb::Canvas ref(reference_buf, cb::SCREEN_W, cb::SCREEN_H);
@@ -57,12 +84,12 @@ static void check_equivalence(const cb::EffectParams& p, uint32_t frame) {
     cb::post_process_stream(src, p, frame, ring, sizeof ring,
                             out_row, collect_row, &s);
 
-    char msg[256];
+    char msg[320];
     if (s.calls != cb::SCREEN_H || s.bad_y >= 0 || s.bad_w >= 0) {
         snprintf(msg, sizeof msg,
-                 "sink contract broken (r=%u str=%u scan=%u vig=%u flick=%u frame=%u): "
+                 "sink contract broken (%s r=%u str=%u scan=%u vig=%u flick=%u frame=%u): "
                  "%d calls (want %d), first out-of-order y=%d, first bad w=%d",
-                 p.bloom_radius, p.bloom_strength, p.scanline_depth,
+                 canvas_name, p.bloom_radius, p.bloom_strength, p.scanline_depth,
                  p.vignette_strength, p.flicker_amount, (unsigned)frame,
                  s.calls, cb::SCREEN_H, s.bad_y, s.bad_w);
         TEST_FAIL_MESSAGE(msg);
@@ -72,9 +99,9 @@ static void check_equivalence(const cb::EffectParams& p, uint32_t frame) {
         size_t i = 0;
         while (i < N && accum_buf[i] == pristine_buf[i]) i++;
         snprintf(msg, sizeof msg,
-                 "post_process_stream wrote to src (r=%u str=%u scan=%u vig=%u "
+                 "post_process_stream wrote to src (%s r=%u str=%u scan=%u vig=%u "
                  "flick=%u frame=%u): byte %zu %u -> %u",
-                 p.bloom_radius, p.bloom_strength, p.scanline_depth,
+                 canvas_name, p.bloom_radius, p.bloom_strength, p.scanline_depth,
                  p.vignette_strength, p.flicker_amount, (unsigned)frame,
                  i, (unsigned)pristine_buf[i], (unsigned)accum_buf[i]);
         TEST_FAIL_MESSAGE(msg);
@@ -83,9 +110,9 @@ static void check_equivalence(const cb::EffectParams& p, uint32_t frame) {
     for (size_t i = 0; i < N; i++) {
         if (streamed_buf[i] != reference_buf[i]) {
             snprintf(msg, sizeof msg,
-                     "stream differs from post_process (r=%u str=%u scan=%u vig=%u "
+                     "stream differs from post_process (%s r=%u str=%u scan=%u vig=%u "
                      "flick=%u frame=%u): byte %zu at (%zu,%zu) ref=%u stream=%u",
-                     p.bloom_radius, p.bloom_strength, p.scanline_depth,
+                     canvas_name, p.bloom_radius, p.bloom_strength, p.scanline_depth,
                      p.vignette_strength, p.flicker_amount, (unsigned)frame,
                      i, i % cb::SCREEN_W, i / cb::SCREEN_W,
                      (unsigned)reference_buf[i], (unsigned)streamed_buf[i]);
@@ -94,14 +121,9 @@ static void check_equivalence(const cb::EffectParams& p, uint32_t frame) {
     }
 }
 
-void test_stream_matches_post_process_at_defaults(void) {
-    draw_fixture();
-    check_equivalence(cb::EffectParams::defaults(), 0);
-}
-
-void test_stream_matches_post_process_across_the_parameter_sweep(void) {
-    draw_fixture();
-
+// Every combination of the parameters that change which branches run, against
+// whatever is currently in pristine_buf.
+static void sweep_all_params(void) {
     static const uint8_t radii[]    = { 0, 1, 2, 3, 4 };
     static const uint8_t strength[] = { 0, 240 };
     static const uint8_t scan[]     = { 0, 84 };
@@ -111,11 +133,11 @@ void test_stream_matches_post_process_across_the_parameter_sweep(void) {
     static const uint32_t frames[]  = { 0, 1, 7, 511 };
 
     cb::EffectParams p = cb::EffectParams::defaults();
-    for (size_t a = 0; a < sizeof radii; a++)
-    for (size_t b = 0; b < sizeof strength; b++)
-    for (size_t c = 0; c < sizeof scan; c++)
-    for (size_t d = 0; d < sizeof vig; d++)
-    for (size_t e = 0; e < sizeof flick; e++)
+    for (size_t a = 0; a < sizeof radii / sizeof radii[0]; a++)
+    for (size_t b = 0; b < sizeof strength / sizeof strength[0]; b++)
+    for (size_t c = 0; c < sizeof scan / sizeof scan[0]; c++)
+    for (size_t d = 0; d < sizeof vig / sizeof vig[0]; d++)
+    for (size_t e = 0; e < sizeof flick / sizeof flick[0]; e++)
     for (size_t f = 0; f < sizeof frames / sizeof frames[0]; f++) {
         p.bloom_radius = radii[a];
         p.bloom_strength = strength[b];
@@ -126,9 +148,33 @@ void test_stream_matches_post_process_across_the_parameter_sweep(void) {
     }
 }
 
+void test_stream_matches_post_process_at_defaults(void) {
+    draw_fixture();
+    check_equivalence(cb::EffectParams::defaults(), 0);
+}
+
+void test_stream_matches_post_process_across_the_parameter_sweep(void) {
+    draw_fixture();
+    sweep_all_params();
+}
+
+void test_stream_matches_post_process_on_lit_edges(void) {
+    draw_fixture_with_lit_edges();
+    sweep_all_params();
+}
+
+void test_stream_row_bytes_sizes_the_scratch_row(void) {
+    TEST_ASSERT_EQUAL_UINT(cb::SCREEN_W, cb::stream_row_bytes(cb::SCREEN_W));
+    TEST_ASSERT_TRUE(sizeof out_row >= cb::stream_row_bytes(cb::SCREEN_W));
+    TEST_ASSERT_EQUAL_UINT(0, cb::stream_row_bytes(0));
+    TEST_ASSERT_EQUAL_UINT(0, cb::stream_row_bytes(-4));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_stream_matches_post_process_at_defaults);
     RUN_TEST(test_stream_matches_post_process_across_the_parameter_sweep);
+    RUN_TEST(test_stream_matches_post_process_on_lit_edges);
+    RUN_TEST(test_stream_row_bytes_sizes_the_scratch_row);
     return UNITY_END();
 }
