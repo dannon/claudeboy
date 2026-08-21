@@ -28,7 +28,11 @@ function bearer(request: Request): string | null {
  * defence we lean on.
  */
 function tokenMatches(supplied: string | null, expected: string): boolean {
-  if (supplied === null || expected.length === 0) return false;
+  // Env types both tokens as string, but a secret that was never `wrangler secret
+  // put` arrives as undefined. Fail closed with a 401 rather than a TypeError 500.
+  if (supplied === null || typeof expected !== 'string' || expected.length === 0) {
+    return false;
+  }
   if (supplied.length !== expected.length) return false;
   let diff = 0;
   for (let i = 0; i < supplied.length; i++) {
@@ -38,7 +42,20 @@ function tokenMatches(supplied: string | null, expected: string): boolean {
 }
 
 function unauthorized(): Response {
-  return new Response(null, { status: 401 });
+  // RFC 7235 3.1 wants the scheme named so a client knows what to retry with.
+  return new Response(null, { status: 401, headers: { 'www-authenticate': 'Bearer' } });
+}
+
+// RFC 7231 6.5.5 requires Allow on a 405. HEAD is deliberately absent: the method
+// check is strict equality, so HEAD lands here too.
+function methodNotAllowed(allow: string): Response {
+  return new Response(null, { status: 405, headers: { allow } });
+}
+
+function noSnapshot(): Response {
+  return new Response(JSON.stringify({ error: 'no snapshot' }), {
+    status: 503, headers: JSON_HEADERS,
+  });
 }
 
 async function handlePush(request: Request, env: Env): Promise<Response> {
@@ -72,13 +89,17 @@ async function handleSnapshot(request: Request, env: Env): Promise<Response> {
   if (!tokenMatches(bearer(request), env.CLAUDEBOY_READ_TOKEN)) return unauthorized();
 
   const stored = await env.SNAPSHOTS.get(KV_KEY);
-  if (stored === null) {
-    return new Response(JSON.stringify({ error: 'no snapshot' }), {
-      status: 503, headers: JSON_HEADERS,
-    });
+  if (stored === null) return noSnapshot();
+
+  let body: PushBody;
+  try {
+    body = JSON.parse(stored) as PushBody;
+  } catch {
+    // A corrupt value is worth no more to a client than a missing one, and both
+    // clients already render the 503. A bare 500 is a state neither knows.
+    return noSnapshot();
   }
 
-  const body = JSON.parse(stored) as PushBody;
   const snapshot: Snapshot = {
     serverTime: Math.floor(Date.now() / 1000),
     providers: body.providers,
@@ -94,11 +115,11 @@ export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === '/v1/push') {
-      if (request.method !== 'POST') return new Response(null, { status: 405 });
+      if (request.method !== 'POST') return methodNotAllowed('POST');
       return handlePush(request, env);
     }
     if (pathname === '/v1/snapshot') {
-      if (request.method !== 'GET') return new Response(null, { status: 405 });
+      if (request.method !== 'GET') return methodNotAllowed('GET');
       return handleSnapshot(request, env);
     }
     return new Response(null, { status: 404 });

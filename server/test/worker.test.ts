@@ -38,6 +38,20 @@ function push(token: string, payload: unknown) {
   );
 }
 
+// Sends the authorization header verbatim, so a value that is not a Bearer
+// credential actually reaches the scheme check.
+function rawAuth(header: string) {
+  return worker.fetch(
+    new Request('https://x/v1/push', {
+      method: 'POST',
+      headers: { authorization: header, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    env,
+    ctx,
+  );
+}
+
 function get(token: string | null, query = '') {
   return worker.fetch(
     new Request(`https://x/v1/snapshot${query}`, {
@@ -58,6 +72,11 @@ describe('POST /v1/push', () => {
   it('rejects a missing, malformed or wrong token with 401', async () => {
     expect((await push('read-secret', body)).status).toBe(401);
     expect((await push('nonsense', body)).status).toBe(401);
+    // The Bearer prefix is the only thing between a raw header value and
+    // tokenMatches, so a correct token without it must still be rejected.
+    expect((await rawAuth('push-secret')).status).toBe(401);
+    expect((await rawAuth('Basic cHVzaC1zZWNyZXQ=')).status).toBe(401);
+    expect((await rawAuth('Bearerpush-secret')).status).toBe(401);
     const bare = await worker.fetch(
       new Request('https://x/v1/push', { method: 'POST', body: '{}' }), env, ctx);
     expect(bare.status).toBe(401);
@@ -67,6 +86,9 @@ describe('POST /v1/push', () => {
     const r = await push('push-secret', { providers: [{ id: 'x' }] });
     expect(r.status).toBe(400);
     expect(kv.store.size).toBe(0);
+    // The field-level diagnostic from the schema is what makes a rejected push
+    // debuggable from the agent side, so it has to survive the Worker.
+    expect(await r.json()).toEqual({ error: 'providers[0].displayName must be a string' });
   });
 
   it('rejects unparseable JSON with 400', async () => {
@@ -77,6 +99,7 @@ describe('POST /v1/push', () => {
         body: 'not json',
       }), env, ctx);
     expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: 'body is not JSON' });
   });
 
   it('stores only providers, never a serverTime', async () => {
@@ -89,10 +112,24 @@ describe('GET /v1/snapshot', () => {
   it('rejects a missing or wrong token with 401', async () => {
     await push('push-secret', body);
     expect((await get(null)).status).toBe(401);
-    expect((await get('push-secret')).status).toBe(401);
+    const wrong = await get('push-secret');
+    expect(wrong.status).toBe(401);
+    expect(wrong.headers.get('www-authenticate')).toBe('Bearer');
   });
 
   it('returns 503 when nothing has been pushed yet', async () => {
+    const r = await get('read-secret');
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ error: 'no snapshot' });
+  });
+
+  it('401s rather than 500s when the token secret was never deployed', async () => {
+    env.CLAUDEBOY_READ_TOKEN = undefined as unknown as string;
+    expect((await get('read-secret')).status).toBe(401);
+  });
+
+  it('degrades to 503 when the stored value is not JSON', async () => {
+    kv.store.set(KV_KEY, 'not json');
     const r = await get('read-secret');
     expect(r.status).toBe(503);
     expect(await r.json()).toEqual({ error: 'no snapshot' });
@@ -138,10 +175,12 @@ describe('routing', () => {
       new Request('https://x/v1/push', { headers: { authorization: 'Bearer push-secret' } }),
       env, ctx);
     expect(g.status).toBe(405);
+    expect(g.headers.get('allow')).toBe('POST');
     const p = await worker.fetch(
       new Request('https://x/v1/snapshot', {
         method: 'POST', headers: { authorization: 'Bearer read-secret' },
       }), env, ctx);
     expect(p.status).toBe(405);
+    expect(p.headers.get('allow')).toBe('GET');
   });
 });
