@@ -193,6 +193,31 @@ void test_vignette_leaves_centre_alone(void) {
     TEST_ASSERT_UINT8_WITHIN(6, 200, c.at(16, 8));
 }
 
+void test_post_process_runs_all_stages(void) {
+    cb::Canvas c = mkc();
+    c.fill(8, 4, 16, 8, 220);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    uint8_t ring[9 * 32];
+    cb::post_process(c, p, 7, ring, sizeof ring);
+    TEST_ASSERT_TRUE(c.at(16, 8) > 0);                 // centre survives
+    TEST_ASSERT_TRUE(c.at(0, 0) < c.at(16, 8));        // vignette applied
+    TEST_ASSERT_TRUE(c.at(16, 5) != c.at(16, 4));      // scanlines applied
+}
+
+void test_post_process_is_deterministic(void) {
+    uint8_t a[32 * 16], b[32 * 16];
+    uint8_t ring[9 * 32];
+    cb::EffectParams p = cb::EffectParams::defaults();
+    for (int pass = 0; pass < 2; pass++) {
+        uint8_t* target = pass ? b : a;
+        memset(target, 0, 32 * 16);
+        cb::Canvas c(target, 32, 16);
+        c.fill(8, 4, 16, 8, 220);
+        cb::post_process(c, p, 99, ring, sizeof ring);
+    }
+    TEST_ASSERT_EQUAL_MEMORY(a, b, 32 * 16);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_zero_intensity_is_black);
@@ -218,5 +243,7 @@ int main(int, char**) {
     RUN_TEST(test_scanlines_stay_subtle_at_defaults);
     RUN_TEST(test_vignette_darkens_corners_more_than_centre);
     RUN_TEST(test_vignette_leaves_centre_alone);
+    RUN_TEST(test_post_process_runs_all_stages);
+    RUN_TEST(test_post_process_is_deterministic);
     return UNITY_END();
 }

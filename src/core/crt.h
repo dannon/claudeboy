@@ -34,4 +34,9 @@ void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_by
 void apply_scanlines(Canvas& c, const EffectParams& p);
 void apply_vignette(Canvas& c, const EffectParams& p);
 
+// Applies bloom, scanlines, vignette and flicker in that fixed order.
+// Decay and drawing happen before this call, not inside it.
+void post_process(Canvas& c, const EffectParams& p, uint32_t frame,
+                  uint8_t* ring, size_t ring_bytes);
+
 }  // namespace cb

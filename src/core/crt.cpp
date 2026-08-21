@@ -135,4 +135,12 @@ void apply_vignette(Canvas& c, const EffectParams& p) {
     }
 }
 
+void post_process(Canvas& c, const EffectParams& p, uint32_t frame,
+                  uint8_t* ring, size_t ring_bytes) {
+    apply_bloom(c, p, ring, ring_bytes);
+    apply_scanlines(c, p);
+    apply_vignette(c, p);
+    apply_gain(c, flicker_gain(p, frame));
+}
+
 }  // namespace cb
