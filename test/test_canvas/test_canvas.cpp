@@ -108,6 +108,7 @@ void test_degenerate_canvas_is_inert(void) {
 }
 
 #include "core/font.h"
+#include "core/font_data.h"
 
 static uint8_t wide[64 * 16];
 static cb::Canvas mkwide() { memset(wide, 0, sizeof wide); return cb::Canvas(wide, 64, 16); }
@@ -154,6 +155,44 @@ void test_unprintable_char_is_skipped(void) {
     for (int i = 0; i < 64 * 16; i++) TEST_ASSERT_EQUAL_UINT8(0, wide[i]);
 }
 
+void test_font_data_matches_known_glyphs(void) {
+    // Verify the font data contains the correct glyphs for ASCII 32, 33, 48, 65.
+    // Each glyph is 5 bytes at index (ch - 32) * 5.
+
+    // ASCII 32 space
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 0]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 2]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 3]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 4]);
+
+    // ASCII 33 '!'
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 0]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 1]);
+    TEST_ASSERT_EQUAL_UINT8(0x5F, cb::FONT_DATA[1 * 5 + 2]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 3]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 4]);
+
+    // ASCII 48 '0'
+    TEST_ASSERT_EQUAL_UINT8(0x3E, cb::FONT_DATA[16 * 5 + 0]);
+    TEST_ASSERT_EQUAL_UINT8(0x51, cb::FONT_DATA[16 * 5 + 1]);
+    TEST_ASSERT_EQUAL_UINT8(0x49, cb::FONT_DATA[16 * 5 + 2]);
+    TEST_ASSERT_EQUAL_UINT8(0x45, cb::FONT_DATA[16 * 5 + 3]);
+    TEST_ASSERT_EQUAL_UINT8(0x3E, cb::FONT_DATA[16 * 5 + 4]);
+
+    // ASCII 65 'A'
+    TEST_ASSERT_EQUAL_UINT8(0x7C, cb::FONT_DATA[33 * 5 + 0]);
+    TEST_ASSERT_EQUAL_UINT8(0x12, cb::FONT_DATA[33 * 5 + 1]);
+    TEST_ASSERT_EQUAL_UINT8(0x11, cb::FONT_DATA[33 * 5 + 2]);
+    TEST_ASSERT_EQUAL_UINT8(0x12, cb::FONT_DATA[33 * 5 + 3]);
+    TEST_ASSERT_EQUAL_UINT8(0x7C, cb::FONT_DATA[33 * 5 + 4]);
+
+    // Verify font boundaries and size
+    TEST_ASSERT_EQUAL_INT(32, cb::FONT_FIRST);
+    TEST_ASSERT_EQUAL_INT(126, cb::FONT_LAST);
+    TEST_ASSERT_EQUAL_INT(475, sizeof(cb::FONT_DATA));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_plot_and_read);
@@ -171,5 +210,6 @@ int main(int, char**) {
     RUN_TEST(test_space_draws_nothing);
     RUN_TEST(test_scale_two_doubles_each_pixel);
     RUN_TEST(test_unprintable_char_is_skipped);
+    RUN_TEST(test_font_data_matches_known_glyphs);
     return UNITY_END();
 }

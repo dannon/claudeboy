@@ -18,6 +18,9 @@ def main() -> int:
         return 1
     text = SRC.read_text(errors="replace")
     body = text[text.index("{") + 1 : text.rindex("}")]
+    # Strip comments before tokenizing to avoid picking up numbers from comments
+    body = re.sub(r"//.*?$", "", body, flags=re.MULTILINE)  # Remove // to end-of-line
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)  # Remove /* */ blocks
     vals = [int(t, 0) for t in re.findall(r"0[xX][0-9a-fA-F]+|\d+", body)]
     if len(vals) < (LAST + 1) * 5:
         print(f"expected >= {(LAST+1)*5} bytes, got {len(vals)}", file=sys.stderr)
