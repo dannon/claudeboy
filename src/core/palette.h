@@ -11,4 +11,9 @@ struct Rgb { uint8_t r, g, b; };
 Rgb palette_rgb(uint8_t intensity);
 uint16_t palette_rgb565(uint8_t intensity);
 
+// Fills a caller-provided 256-entry table with the RGB565 value for each
+// intensity, so hot loops can look up instead of recomputing. Caller owns
+// the storage; this never allocates.
+void palette_build_rgb565_table(uint16_t out[256]);
+
 }  // namespace cb

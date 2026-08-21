@@ -16,4 +16,8 @@ uint16_t palette_rgb565(uint8_t i) {
     return static_cast<uint16_t>(((c.r & 0xF8) << 8) | ((c.g & 0xFC) << 3) | (c.b >> 3));
 }
 
+void palette_build_rgb565_table(uint16_t out[256]) {
+    for (int i = 0; i < 256; i++) out[i] = palette_rgb565(static_cast<uint8_t>(i));
+}
+
 }  // namespace cb

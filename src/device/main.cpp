@@ -13,6 +13,7 @@ static TFT_eSPI tft;
 static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];   // the one accumulator
 static uint8_t g_ring[9 * cb::SCREEN_W];
 static uint16_t g_line[cb::SCREEN_W];
+static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
 
 static uint32_t g_frame = 0;
 
@@ -30,6 +31,7 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
 
     memset(g_buf, 0, sizeof g_buf);
+    cb::palette_build_rgb565_table(g_palette);
     Serial.printf("claudeboy: after buffers, free heap %u bytes\n",
                   (unsigned)ESP.getFreeHeap());
 }
@@ -54,7 +56,7 @@ void loop() {
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
     for (int y = 0; y < cb::SCREEN_H; y++) {
         const uint8_t* row = g_buf + (size_t)y * cb::SCREEN_W;
-        for (int x = 0; x < cb::SCREEN_W; x++) g_line[x] = cb::palette_rgb565(row[x]);
+        for (int x = 0; x < cb::SCREEN_W; x++) g_line[x] = g_palette[row[x]];
         tft.pushPixels(g_line, cb::SCREEN_W);
     }
     tft.endWrite();
