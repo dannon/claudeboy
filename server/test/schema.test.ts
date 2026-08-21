@@ -34,13 +34,28 @@ function reject(mutate: (b: any) => void, needle: string) {
   if (!r.ok) expect(r.error).toContain(needle);
 }
 
+function accept(mutate: (b: any) => void) {
+  const body = structuredClone(VALID);
+  mutate(body);
+  const r = validatePushBody(body);
+  if (!r.ok) throw new Error(`expected acceptance, got: ${r.error}`);
+  return r.value;
+}
+
 describe('validatePushBody', () => {
   it('accepts a well-formed body, including a provider with no text or chart', () => {
     const r = validatePushBody(VALID);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.value.providers).toHaveLength(2);
+      // Every field has to survive into the returned value -- this is what the
+      // Worker stores and serves, so a dropped field is a wire regression.
+      expect(r.value.providers[0]).toEqual(VALID.providers[0]);
+      expect(r.value.providers[0]!.text).toEqual([{ label: 'Today', value: '$201.28' }]);
+      expect(r.value.providers[0]!.chart).toEqual([{ label: 'Jul 22', value: 7059800 }]);
+      expect(r.value.providers[1]).toEqual(VALID.providers[1]);
       expect(r.value.providers[1]!.text).toBeUndefined();
+      expect(r.value.providers[1]!.chart).toBeUndefined();
     }
   });
 
@@ -73,6 +88,18 @@ describe('validatePushBody', () => {
     reject((b) => (b.providers[0].fetchedAt = 'yesterday'), 'fetchedAt');
   });
 
+  it('rejects integers the 32-bit watch cannot hold', () => {
+    reject((b) => (b.providers[0].chart[0].value = 9e15), 'value');
+    reject((b) => (b.providers[0].progress[0].periodSec = 2147483648), 'periodSec');
+    reject((b) => (b.providers[0].progress[0].used = -2147483649), 'used');
+  });
+
+  it('rejects progress numbers that break every percentage downstream', () => {
+    reject((b) => (b.providers[0].progress[0].used = -5), 'used');
+    reject((b) => (b.providers[0].progress[0].limit = 0), 'limit');
+    reject((b) => (b.providers[0].progress[0].periodSec = 0), 'periodSec');
+  });
+
   it('rejects a progress line missing a field', () => {
     reject((b) => delete b.providers[0].progress[0].label, 'label');
     reject((b) => delete b.providers[0].progress[0].periodSec, 'periodSec');
@@ -81,6 +108,18 @@ describe('validatePushBody', () => {
   it('rejects malformed text and chart entries', () => {
     reject((b) => (b.providers[0].text = [{ label: 'x' }]), 'value');
     reject((b) => (b.providers[0].chart = [{ label: 'x', value: 'big' }]), 'value');
+  });
+
+  it('normalises empty text and chart to absent, never []', () => {
+    const value = accept((b) => {
+      b.providers[0].text = [];
+      b.providers[0].chart = [];
+    });
+    expect(value.providers[0]!.text).toBeUndefined();
+    expect(value.providers[0]!.chart).toBeUndefined();
+    const wire = JSON.stringify(value);
+    expect(wire).not.toContain('"text"');
+    expect(wire).not.toContain('"chart"');
   });
 
   it('accepts an empty providers array', () => {

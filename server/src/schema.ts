@@ -52,6 +52,11 @@ export type ValidationResult =
 // year 5138; 1e11 milliseconds is 1973. Nothing legitimate lands between.
 const MILLIS_THRESHOLD = 1e11;
 
+// Monkey C's Number is signed 32-bit, so every integer on the wire has to fit
+// here or the watch silently wraps it.
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
 function isRecord(u: unknown): u is Record<string, unknown> {
   return typeof u === 'object' && u !== null && !Array.isArray(u);
 }
@@ -67,15 +72,31 @@ function int(o: Record<string, unknown>, key: string, where: string): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) {
     throw new Error(`${where}.${key} must be an integer`);
   }
+  if (v < INT32_MIN || v > INT32_MAX) {
+    throw new Error(`${where}.${key} does not fit in a signed 32-bit integer`);
+  }
+  return v;
+}
+
+function intAtLeast(
+  o: Record<string, unknown>,
+  key: string,
+  where: string,
+  min: number,
+): number {
+  const v = int(o, key, where);
+  if (v < min) throw new Error(`${where}.${key} must be at least ${min}`);
   return v;
 }
 
 function epochSec(o: Record<string, unknown>, key: string, where: string): number {
-  const v = int(o, key, where);
-  if (Math.abs(v) >= MILLIS_THRESHOLD) {
+  // Ahead of the int32 check on purpose: epoch millis blows both bounds and the
+  // millisecond diagnosis is the one that tells you where the bug actually is.
+  const v = o[key];
+  if (typeof v === 'number' && Math.abs(v) >= MILLIS_THRESHOLD) {
     throw new Error(`${where}.${key} looks like milliseconds; must be epoch seconds`);
   }
-  return v;
+  return int(o, key, where);
 }
 
 function arr(o: Record<string, unknown>, key: string, where: string): unknown[] {
@@ -88,10 +109,12 @@ function progressLine(u: unknown, where: string): ProgressLine {
   if (!isRecord(u)) throw new Error(`${where} must be an object`);
   return {
     label: str(u, 'label', where),
-    used: int(u, 'used', where),
-    limit: int(u, 'limit', where),
+    used: intAtLeast(u, 'used', where, 0),
+    // A zero limit or period is a divide-by-zero in every percentage the Worker,
+    // the CYD and the watch compute, so it never gets past the push.
+    limit: intAtLeast(u, 'limit', where, 1),
     resetsAt: epochSec(u, 'resetsAt', where),
-    periodSec: int(u, 'periodSec', where),
+    periodSec: intAtLeast(u, 'periodSec', where, 1),
   };
 }
 
@@ -105,6 +128,19 @@ function chartPoint(u: unknown, where: string): ChartPoint {
   return { label: str(u, 'label', where), value: int(u, 'value', where) };
 }
 
+function optional<T>(
+  u: Record<string, unknown>,
+  key: string,
+  where: string,
+  item: (v: unknown, where: string) => T,
+): T[] | undefined {
+  if (u[key] === undefined) return undefined;
+  const out = arr(u, key, where).map((v, i) => item(v, `${where}.${key}[${i}]`));
+  // Absent is the contract for "none"; an empty array is a different thing on the
+  // wire, so it is normalised away here rather than left to the producer.
+  return out.length ? out : undefined;
+}
+
 function provider(u: unknown, where: string): Provider {
   if (!isRecord(u)) throw new Error(`${where} must be an object`);
   const p: Provider = {
@@ -116,14 +152,10 @@ function provider(u: unknown, where: string): Provider {
       progressLine(l, `${where}.progress[${i}]`),
     ),
   };
-  // Absent is the contract for "none"; an empty array would be a different thing
-  // on the wire and clients should never see it.
-  if (u['text'] !== undefined) {
-    p.text = arr(u, 'text', where).map((l, i) => textLine(l, `${where}.text[${i}]`));
-  }
-  if (u['chart'] !== undefined) {
-    p.chart = arr(u, 'chart', where).map((l, i) => chartPoint(l, `${where}.chart[${i}]`));
-  }
+  const text = optional(u, 'text', where, textLine);
+  if (text) p.text = text;
+  const chart = optional(u, 'chart', where, chartPoint);
+  if (chart) p.chart = chart;
   return p;
 }
 
