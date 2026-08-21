@@ -37,6 +37,28 @@ static uint32_t g_frame = 0;
 // uint32_t here even at the same width, hence the wrapper.
 static uint32_t now_us() { return static_cast<uint32_t>(micros()); }
 
+// The fixture is a frozen capture and the device just keeps counting past it,
+// so every progress window would expire a few minutes in and sit at
+// "SURPLUS 0m" forever. Roll each window forward into the present before
+// drawing, which is what a live feed would have done. Only the device does
+// this: the host stays pinned to the reference instant so the golden holds.
+static cb::ProgressLine g_lines[8];
+static cb::Provider g_prov;
+static cb::UsageSnapshot g_live;
+
+static const cb::UsageSnapshot& live_snapshot(int64_t now) {
+    const cb::UsageSnapshot& base = cb::fixture_snapshot();
+    g_prov = base.providers[0];
+    int n = g_prov.progress_count;
+    if (n > (int)(sizeof g_lines / sizeof g_lines[0])) n = sizeof g_lines / sizeof g_lines[0];
+    for (int i = 0; i < n; i++)
+        g_lines[i] = cb::roll_window_forward(base.providers[0].progress[i], now);
+    g_prov.progress = g_lines;
+    g_prov.progress_count = n;
+    g_live = {&g_prov, 1, now};
+    return g_live;
+}
+
 void setup() {
     Serial.begin(115200);
     delay(100);
@@ -71,11 +93,13 @@ void loop() {
     // Phase 1 has no clock source, so the fixture's own reference time is used
     // and advanced by wall milliseconds since boot. The gauges therefore age.
     const int64_t now = cb::FIXTURE_REFERENCE_MS + (int64_t)millis();
+    char clk[8];
+    cb::format_clock(now, clk, sizeof clk);   // UTC; phase 2 brings a real zone
 
     cb::Canvas shown(g_shown, cb::SCREEN_W, cb::SCREEN_H);
     cb::FrameTiming timing{now_us, 0, 0};
     const uint32_t t_frame_start = micros();
-    cb::render_frame(c, shown, cb::fixture_snapshot(), 0, now, "--:--", fx,
+    cb::render_frame(c, shown, live_snapshot(now), 0, now, clk, fx,
                      g_frame, g_ring, sizeof g_ring, &timing);
     const uint32_t t_post_end = micros();
 

@@ -46,4 +46,14 @@ const UsageSnapshot kSnapshot = {kProviders, 1, REF};
 
 const UsageSnapshot& fixture_snapshot() { return kSnapshot; }
 
+ProgressLine roll_window_forward(const ProgressLine& line, int64_t now_ms) {
+    ProgressLine out = line;
+    if (out.period_ms <= 0 || out.resets_at_ms > now_ms) return out;
+    // Divide rather than loop: `now` can sit thousands of periods past a
+    // capture that has been on the shelf a while.
+    const int64_t steps = (now_ms - out.resets_at_ms) / out.period_ms + 1;
+    out.resets_at_ms += steps * out.period_ms;
+    return out;
+}
+
 }  // namespace cb

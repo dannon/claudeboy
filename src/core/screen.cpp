@@ -17,6 +17,14 @@ void format_duration(int64_t ms, char* out, size_t n) {
     else                snprintf(out, n, "%lldm", (long long)mins);
 }
 
+void format_clock(int64_t now_ms, char* out, size_t n) {
+    if (!out || n == 0) return;
+    if (now_ms < 0) now_ms = 0;
+    const int64_t total_min = now_ms / 60000;
+    snprintf(out, n, "%02d:%02d", static_cast<int>((total_min / 60) % 24),
+             static_cast<int>(total_min % 60));
+}
+
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock) {
     int x = MARGIN;
     for (int i = 0; i < snap.provider_count; i++) {

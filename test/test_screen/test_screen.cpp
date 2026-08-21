@@ -33,6 +33,19 @@ void test_format_duration_zero_and_negative(void) {
     cb::format_duration(-5000, b, sizeof b); TEST_ASSERT_EQUAL_STRING("0m", b);
 }
 
+void test_format_clock_renders_hh_mm(void) {
+    char b[8];
+    // The capture instant itself, 2026-08-21T13:44:34Z.
+    cb::format_clock(cb::FIXTURE_REFERENCE_MS, b, sizeof b);
+    TEST_ASSERT_EQUAL_STRING("13:44", b);
+    // Midnight UTC must not come out as 24:00, and a negative instant must
+    // not produce a negative field.
+    cb::format_clock(0, b, sizeof b);       TEST_ASSERT_EQUAL_STRING("00:00", b);
+    cb::format_clock(-5000, b, sizeof b);   TEST_ASSERT_EQUAL_STRING("00:00", b);
+    cb::format_clock(86399LL * 1000, b, sizeof b); TEST_ASSERT_EQUAL_STRING("23:59", b);
+    cb::format_clock(86400LL * 1000, b, sizeof b); TEST_ASSERT_EQUAL_STRING("00:00", b);
+}
+
 void test_layout_fits_the_panel(void) {
     TEST_ASSERT_TRUE(cb::CELL_Y + cb::CELL_H < cb::CHART_Y);
     TEST_ASSERT_TRUE(cb::CHART_Y + cb::CHART_H < cb::FOOT_Y);
@@ -188,6 +201,7 @@ int main(int, char**) {
     RUN_TEST(test_format_duration_days_and_hours);
     RUN_TEST(test_format_duration_zero_and_negative);
     RUN_TEST(test_format_duration_clamps_absurd_values);
+    RUN_TEST(test_format_clock_renders_hh_mm);
     RUN_TEST(test_layout_fits_the_panel);
     RUN_TEST(test_tabs_draw_in_the_strip_only);
     RUN_TEST(test_footer_draws_at_the_bottom);

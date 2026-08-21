@@ -27,6 +27,10 @@ constexpr uint8_t I_RULE   = 150;
 // "45m", "1h20m", "2d23h". Never negative, never longer than 7 chars.
 void format_duration(int64_t ms, char* out, size_t n);
 
+// "14:44" from an epoch-ms instant, in UTC -- core/ has no timezone database
+// and the device has no zone to read. Always 5 chars.
+void format_clock(int64_t now_ms, char* out, size_t n);
+
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock);
 void draw_footer(Canvas& c, const char* left, const char* right);
 
