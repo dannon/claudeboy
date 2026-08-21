@@ -119,11 +119,14 @@ void test_tallest_bar_is_the_peak_day(void) {
     cb::Canvas c = mks();
     const cb::Provider& p = cb::fixture_snapshot().providers[0];
     cb::draw_chart(c, p);
-    // Aug 19 (index 6) is the 527M peak; it should be the tallest column.
+    // The fixture carries the full 31-day window from the capture; Aug 19
+    // (index 28) is the 527.3M peak and should be the tallest column.
+    TEST_ASSERT_EQUAL_INT(31, p.chart_count);
     int peak_idx = 0;
     for (int i = 1; i < p.chart_count; i++)
         if (p.chart[i].value > p.chart[peak_idx].value) peak_idx = i;
-    TEST_ASSERT_EQUAL_INT(6, peak_idx);
+    TEST_ASSERT_EQUAL_INT(28, peak_idx);
+    TEST_ASSERT_EQUAL_INT64(527342458LL, p.chart[peak_idx].value);
 }
 
 void test_empty_chart_does_not_crash(void) {

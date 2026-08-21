@@ -13,22 +13,31 @@ const ProgressLine kClaudeProgress[] = {
 };
 
 const TextLine kClaudeText[] = {
-    {"TODAY",     "$55.40 - 54.8M"},
+    {"TODAY",     "$56.67 - 56.3M"},
     {"YESTERDAY", "$189.52 - 208.3M"},
-    {"30 DAYS",   "$4,511 - 4.8B"},
+    {"30 DAYS",   "$4,512 - 4.8B"},
 };
 
 const ChartPoint kClaudeChart[] = {
-    {"Aug 13", 322582660}, {"Aug 14", 229889008}, {"Aug 15", 121578616},
-    {"Aug 16", 110886360}, {"Aug 17", 169128655}, {"Aug 18",  92107692},
-    {"Aug 19", 527342458}, {"Aug 20", 208264047}, {"Aug 21",  54800000},
+    {"Jul 22", 7059800}, {"Jul 23", 280454831}, {"Jul 24", 75177812},
+    {"Jul 25", 5873186}, {"Jul 26", 170205309}, {"Jul 27", 310289801},
+    {"Jul 28", 288515597}, {"Jul 29", 153338973}, {"Jul 30", 189217143},
+    {"Jul 31", 60061585}, {"Aug 1", 42718893}, {"Aug 2", 69567333},
+    {"Aug 3", 262031528}, {"Aug 4", 116112655}, {"Aug 5", 223694312},
+    {"Aug 6", 70662090}, {"Aug 7", 32189647}, {"Aug 8", 2399092},
+    {"Aug 9", 30911370}, {"Aug 10", 296179122}, {"Aug 11", 193589098},
+    {"Aug 12", 77632582}, {"Aug 13", 322582660}, {"Aug 14", 229889008},
+    {"Aug 15", 121578616}, {"Aug 16", 110886360}, {"Aug 17", 169128655},
+    {"Aug 18", 92107692}, {"Aug 19", 527342458}, {"Aug 20", 208264047},
+    {"Aug 21", 56278305},
 };
+constexpr int kClaudeChartCount = sizeof kClaudeChart / sizeof kClaudeChart[0];
 
 const Provider kProviders[] = {
     {"claude", "CLAUDE",
      kClaudeProgress, 3,
      kClaudeText,     3,
-     kClaudeChart,    9},
+     kClaudeChart,    kClaudeChartCount},
 };
 
 const UsageSnapshot kSnapshot = {kProviders, 1, REF};

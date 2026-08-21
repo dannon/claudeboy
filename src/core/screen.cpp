@@ -128,7 +128,10 @@ void draw_chart(Canvas& c, const Provider& prov) {
 
     const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
     c.rect(x0, CHART_Y, w, CHART_H, I_RULE);
-    draw_text(c, x0 + 3, CHART_Y + 3, "DAILY CONSUMPTION - 30D", I_DIM, 1);
+    // The window is whatever the provider actually sent, not a fixed 30 days.
+    char title[32];
+    snprintf(title, sizeof title, "DAILY CONSUMPTION - %dD", n);
+    draw_text(c, x0 + 3, CHART_Y + 3, title, I_DIM, 1);
 
     int64_t peak = 1;
     for (int i = 0; i < n; i++) if (prov.chart[i].value > peak) peak = prov.chart[i].value;
