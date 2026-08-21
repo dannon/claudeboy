@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "core/canvas.h"
 #include "core/crt.h"
 #include "core/fixture.h"
 #include "core/screen.h"
 #include "core/types.h"
 #include "host/png.h"
+#include "host/tui.h"
 
 // test_build_src pulls src/host/ into every test binary too, which already
 // supplies its own main() via Unity -- keep this one out of that build.
@@ -159,12 +161,67 @@ static int run_contact() {
     return rc;
 }
 
+static void clock_string(int64_t now_ms, char* out, size_t n) {
+    const time_t t = static_cast<time_t>(now_ms / 1000);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    snprintf(out, n, "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+}
+
+static int64_t now_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+// The only mode that runs successive frames -- see the accumulator/copy
+// split below. This is where a frame-over-frame bug (like post_process
+// output leaking back into the accumulator and compounding) would show up;
+// a single-frame PNG or golden can't catch that.
+static int run_tui(bool live) {
+    int cols = 0, rows = 0;
+    if (!cbhost::tui_size(cols, rows)) { fprintf(stderr, "not a terminal\n"); return 1; }
+    const int scale = cbhost::tui_scale(cols, rows);
+
+    const cb::EffectParams fx = cb::EffectParams::defaults();
+    memset(g_buf, 0, sizeof g_buf);
+    cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+
+    cbhost::tui_begin();
+    for (uint32_t frame = 0; !cbhost::tui_interrupted(); frame++) {
+        const int64_t t = live ? now_ms() : cb::FIXTURE_REFERENCE_MS;
+        char clk[8]; clock_string(t, clk, sizeof clk);
+
+        c.decay(fx.decay);
+        cb::render_ambient(c, cb::fixture_snapshot(), 0, t, clk);
+
+        // post_process mutates the canvas it's given, so it runs on a copy.
+        // g_buf/c stay the undimmed accumulator that decay() and
+        // render_ambient() draw into next frame; post-processed output never
+        // feeds back in. This second full-size buffer is host-only -- core/
+        // still uses one accumulator, and the device never makes this copy.
+        static uint8_t shown[cb::SCREEN_W * cb::SCREEN_H];
+        memcpy(shown, g_buf, sizeof shown);
+        cb::Canvas out(shown, cb::SCREEN_W, cb::SCREEN_H);
+        cb::post_process(out, fx, frame, g_ring, sizeof g_ring);
+
+        cbhost::tui_draw(out, scale);
+        if (cbhost::tui_interrupted()) break;
+        struct timespec nap{0, 50 * 1000 * 1000};   // ~20fps
+        nanosleep(&nap, nullptr);
+    }
+    cbhost::tui_end();
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const char* mode = argc > 1 ? argv[1] : "--png";
-    if (!strcmp(mode, "--png"))     return run_png();
-    if (!strcmp(mode, "--bless"))   return run_bless();
-    if (!strcmp(mode, "--contact")) return run_contact();
-    fprintf(stderr, "usage: program [--png|--bless|--contact]\n");
+    if (!strcmp(mode, "--png"))        return run_png();
+    if (!strcmp(mode, "--bless"))      return run_bless();
+    if (!strcmp(mode, "--contact"))    return run_contact();
+    if (!strcmp(mode, "--tui"))        return run_tui(true);
+    if (!strcmp(mode, "--tui-static")) return run_tui(false);
+    fprintf(stderr, "usage: program [--png|--bless|--contact|--tui|--tui-static]\n");
     return 2;
 }
 #endif  // PIO_UNIT_TESTING
