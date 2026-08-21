@@ -7,7 +7,9 @@ export interface Env {
   CLAUDEBOY_READ_TOKEN: string;
 }
 
-export const KV_KEY = 'snapshot:current';
+// Not exported: workerd reads every named export of the entrypoint as an
+// entrypoint class and refuses to start over a plain string.
+const KV_KEY = 'snapshot:current';
 
 const JSON_HEADERS = {
   'content-type': 'application/json',

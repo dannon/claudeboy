@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import worker, { KV_KEY, type Env } from '../src/worker.ts';
+import worker, { type Env } from '../src/worker.ts';
+
+// Spelled out rather than imported: the Worker cannot export it, and a literal
+// here also fails loudly if the key is ever renamed under a live namespace.
+const KV_KEY = 'snapshot:current';
 
 const body = JSON.parse(
   readFileSync(new URL('../fixtures/snapshot-20260821.json', import.meta.url), 'utf8'),
@@ -182,5 +186,15 @@ describe('routing', () => {
       }), env, ctx);
     expect(p.status).toBe(405);
     expect(p.headers.get('allow')).toBe('GET');
+  });
+});
+
+describe('module shape', () => {
+  // workerd treats every named export of the entrypoint as an entrypoint class
+  // and refuses to start the Worker over a plain value, which a plain module
+  // import here would never notice.
+  it('exports nothing but the default handler', async () => {
+    const module = await import('../src/worker.ts');
+    expect(Object.keys(module).filter((k) => k !== 'default')).toEqual([]);
   });
 });
