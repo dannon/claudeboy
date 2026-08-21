@@ -185,3 +185,31 @@ describe('intervalMsFromEnv', () => {
     },
   );
 });
+
+describe('quiet heartbeat', () => {
+  it('stays silent while unchanged, then logs once every 30 polls', async () => {
+    const lines: string[] = [];
+    const cfg = makeConfig({ log: (m) => lines.push(m) });
+    expect(await pollOnce(cfg, state)).toBe('pushed');
+    lines.length = 0;
+
+    for (let i = 0; i < 29; i++) expect(await pollOnce(cfg, state)).toBe('unchanged');
+    expect(lines, 'should be silent for the first 29 quiet polls').toHaveLength(0);
+
+    expect(await pollOnce(cfg, state)).toBe('unchanged');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('no change for 30 polls');
+  });
+
+  it('resets the quiet counter when the data moves again', async () => {
+    const cfg = makeConfig({});
+    await pollOnce(cfg, state);
+    await pollOnce(cfg, state);
+    expect(state.quietPolls).toBe(1);
+    const moved = JSON.parse(rawUsage);
+    moved[0].lines[0].used = 61;
+    await pollOnce(
+      makeConfig({ usageResponse: () => new Response(JSON.stringify(moved)) }), state);
+    expect(state.quietPolls).toBe(0);
+  });
+});

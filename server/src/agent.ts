@@ -14,6 +14,8 @@ export interface AgentConfig {
 
 export interface AgentState {
   lastPushedJson: string | null;
+  /** Consecutive unchanged polls, for the heartbeat. Callers may omit it. */
+  quietPolls?: number;
 }
 
 // Neither fetch has a natural deadline. An OpenUsage that accepts the connection
@@ -24,9 +26,15 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 const DEFAULT_INTERVAL_SEC = 60;
 
-// OpenUsage caches for about five minutes, so polling faster than this buys
-// nothing and just burns KV write budget on the far side.
+// A floor, not a recommendation. This exists so a mangled env var cannot turn
+// the loop into a spin against localhost:6736 -- it is deliberately far below
+// the 60s default, because refusing a value the operator meant is worse than
+// polling a bit eagerly. OpenUsage only refreshes every five minutes or so, so
+// anything under 60 is already buying nothing.
 const MIN_INTERVAL_SEC = 5;
+
+// ~30 minutes at the 60s default.
+const QUIET_HEARTBEAT_POLLS = 30;
 
 /**
  * Poll interval from the environment, in milliseconds.
@@ -91,7 +99,17 @@ export async function pollOnce(
   }
 
   const json = JSON.stringify(body);
-  if (json === state.lastPushedJson) return 'unchanged';
+  if (json === state.lastPushedJson) {
+    // Deduplication means the healthy steady state is silence, which reads
+    // exactly like a crashed agent when someone tails the log to check. Emit a
+    // heartbeat occasionally so "quiet" and "dead" are distinguishable.
+    state.quietPolls = (state.quietPolls ?? 0) + 1;
+    if (state.quietPolls % QUIET_HEARTBEAT_POLLS === 0) {
+      log(`no change for ${state.quietPolls} polls; last push still current`);
+    }
+    return 'unchanged';
+  }
+  state.quietPolls = 0;
 
   try {
     const response = await doFetch(config.pushUrl, {
