@@ -1,0 +1,368 @@
+{
+  "providers": [
+    {
+      "id": "claude",
+      "displayName": "Claude",
+      "plan": "Max 5x",
+      "fetchedAt": 1787344156,
+      "progress": [
+        {
+          "label": "Session",
+          "used": 9,
+          "limit": 100,
+          "resetsAt": 1787360399,
+          "periodSec": 18000
+        },
+        {
+          "label": "Weekly",
+          "used": 67,
+          "limit": 100,
+          "resetsAt": 1787576400,
+          "periodSec": 604800
+        },
+        {
+          "label": "Fable",
+          "used": 17,
+          "limit": 100,
+          "resetsAt": 1787576400,
+          "periodSec": 604800
+        }
+      ],
+      "text": [
+        {
+          "label": "Today",
+          "value": "$221.58 · 287.8M tokens"
+        },
+        {
+          "label": "Yesterday",
+          "value": "$189.52 · 208.3M tokens"
+        },
+        {
+          "label": "Last 30 Days",
+          "value": "$4,677.37 · 5B tokens"
+        }
+      ],
+      "chart": [
+        {
+          "label": "Jul 22",
+          "value": 7059800
+        },
+        {
+          "label": "Jul 23",
+          "value": 280454831
+        },
+        {
+          "label": "Jul 24",
+          "value": 75177812
+        },
+        {
+          "label": "Jul 25",
+          "value": 5873186
+        },
+        {
+          "label": "Jul 26",
+          "value": 170205309
+        },
+        {
+          "label": "Jul 27",
+          "value": 310289801
+        },
+        {
+          "label": "Jul 28",
+          "value": 288515597
+        },
+        {
+          "label": "Jul 29",
+          "value": 153338973
+        },
+        {
+          "label": "Jul 30",
+          "value": 189217143
+        },
+        {
+          "label": "Jul 31",
+          "value": 60061585
+        },
+        {
+          "label": "Aug 1",
+          "value": 42718893
+        },
+        {
+          "label": "Aug 2",
+          "value": 69567333
+        },
+        {
+          "label": "Aug 3",
+          "value": 262031528
+        },
+        {
+          "label": "Aug 4",
+          "value": 116112655
+        },
+        {
+          "label": "Aug 5",
+          "value": 223694312
+        },
+        {
+          "label": "Aug 6",
+          "value": 70662090
+        },
+        {
+          "label": "Aug 7",
+          "value": 32189647
+        },
+        {
+          "label": "Aug 8",
+          "value": 2399092
+        },
+        {
+          "label": "Aug 9",
+          "value": 30911370
+        },
+        {
+          "label": "Aug 10",
+          "value": 296179122
+        },
+        {
+          "label": "Aug 11",
+          "value": 193589098
+        },
+        {
+          "label": "Aug 12",
+          "value": 77632582
+        },
+        {
+          "label": "Aug 13",
+          "value": 322582660
+        },
+        {
+          "label": "Aug 14",
+          "value": 229889008
+        },
+        {
+          "label": "Aug 15",
+          "value": 121578616
+        },
+        {
+          "label": "Aug 16",
+          "value": 110886360
+        },
+        {
+          "label": "Aug 17",
+          "value": 169128655
+        },
+        {
+          "label": "Aug 18",
+          "value": 92107692
+        },
+        {
+          "label": "Aug 19",
+          "value": 527342458
+        },
+        {
+          "label": "Aug 20",
+          "value": 208264047
+        },
+        {
+          "label": "Aug 21",
+          "value": 287773984
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "plan": "Plus",
+      "fetchedAt": 1787344155,
+      "progress": [
+        {
+          "label": "Weekly",
+          "used": 10,
+          "limit": 100,
+          "resetsAt": 1787835963,
+          "periodSec": 604800
+        }
+      ],
+      "text": [
+        {
+          "label": "Rate Limit Resets",
+          "value": "0 available"
+        },
+        {
+          "label": "Credits",
+          "value": "$0.00 · 0 credits"
+        },
+        {
+          "label": "Yesterday",
+          "value": "$12.07 · 11.6M tokens"
+        },
+        {
+          "label": "Last 30 Days",
+          "value": "$195.65 · 191.1M tokens"
+        }
+      ],
+      "chart": [
+        {
+          "label": "Jul 22",
+          "value": 0
+        },
+        {
+          "label": "Jul 23",
+          "value": 858187
+        },
+        {
+          "label": "Jul 24",
+          "value": 1115030
+        },
+        {
+          "label": "Jul 25",
+          "value": 0
+        },
+        {
+          "label": "Jul 26",
+          "value": 16593439
+        },
+        {
+          "label": "Jul 27",
+          "value": 19967744
+        },
+        {
+          "label": "Jul 28",
+          "value": 29912627
+        },
+        {
+          "label": "Jul 29",
+          "value": 15775271
+        },
+        {
+          "label": "Jul 30",
+          "value": 3567049
+        },
+        {
+          "label": "Jul 31",
+          "value": 0
+        },
+        {
+          "label": "Aug 1",
+          "value": 0
+        },
+        {
+          "label": "Aug 2",
+          "value": 0
+        },
+        {
+          "label": "Aug 3",
+          "value": 3953263
+        },
+        {
+          "label": "Aug 4",
+          "value": 14282812
+        },
+        {
+          "label": "Aug 5",
+          "value": 17934037
+        },
+        {
+          "label": "Aug 6",
+          "value": 0
+        },
+        {
+          "label": "Aug 7",
+          "value": 0
+        },
+        {
+          "label": "Aug 8",
+          "value": 0
+        },
+        {
+          "label": "Aug 9",
+          "value": 0
+        },
+        {
+          "label": "Aug 10",
+          "value": 0
+        },
+        {
+          "label": "Aug 11",
+          "value": 5163634
+        },
+        {
+          "label": "Aug 12",
+          "value": 17700315
+        },
+        {
+          "label": "Aug 13",
+          "value": 6100874
+        },
+        {
+          "label": "Aug 14",
+          "value": 0
+        },
+        {
+          "label": "Aug 15",
+          "value": 4883250
+        },
+        {
+          "label": "Aug 16",
+          "value": 0
+        },
+        {
+          "label": "Aug 17",
+          "value": 3214760
+        },
+        {
+          "label": "Aug 18",
+          "value": 0
+        },
+        {
+          "label": "Aug 19",
+          "value": 18505779
+        },
+        {
+          "label": "Aug 20",
+          "value": 11620046
+        },
+        {
+          "label": "Aug 21",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "displayName": "Antigravity",
+      "plan": "Pro",
+      "fetchedAt": 1787344155,
+      "progress": [
+        {
+          "label": "Session",
+          "used": 0,
+          "limit": 100,
+          "resetsAt": 1787361852,
+          "periodSec": 18000
+        },
+        {
+          "label": "Weekly",
+          "used": 0,
+          "limit": 100,
+          "resetsAt": 1787926072,
+          "periodSec": 604800
+        },
+        {
+          "label": "Claude",
+          "used": 0,
+          "limit": 100,
+          "resetsAt": 1787361852,
+          "periodSec": 18000
+        },
+        {
+          "label": "Claude Weekly",
+          "used": 0,
+          "limit": 100,
+          "resetsAt": 1787948652,
+          "periodSec": 604800
+        }
+      ]
+    }
+  ]
+}
