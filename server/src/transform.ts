@@ -80,6 +80,13 @@ function providerFrom(raw: unknown): Provider | null {
   const id = typeof raw['providerId'] === 'string' ? raw['providerId'] : null;
   const displayName = typeof raw['displayName'] === 'string' ? raw['displayName'] : null;
   const fetchedAt = toEpochSec(raw['fetchedAt']);
+  // Dropping the whole provider is deliberate: without an id it cannot be keyed,
+  // without a fetchedAt its age cannot be shown, and a placeholder would be a
+  // fabricated reading on a screen whose entire job is honest numbers.
+  //
+  // The consequence is that every provider after this one slides one slot down
+  // the array, so array position is not a stable handle across polls. Clients
+  // key on `id` -- never on index -- for exactly this reason.
   if (id === null || displayName === null || fetchedAt === null) return null;
   if (!fitsInt32(fetchedAt)) return null;
 

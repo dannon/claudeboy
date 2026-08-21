@@ -22,7 +22,14 @@ field name.
 
     npm install
     npm test
-    npm run typecheck
+    npm run typecheck      # the whole workspace -- see below
+
+`npm run typecheck` is the complete check and the only one to trust. A bare
+`npx tsc --noEmit` reads the root `tsconfig.json`, whose `include` is `src/**`
+minus `agent.ts`, so it silently passes over every test file and over the agent:
+you can drop `export const bad: number = 'nope';` into `test/` and still get exit
+0. The npm script runs the root project and `test/tsconfig.json`, and between them
+every `.ts` file here is checked by one or the other.
 
 ## Locally
 
@@ -57,6 +64,12 @@ pace against a "now" hours in the past. `fetchedAt` carries the age instead.
 
 **Never emit `text: []` or `chart: []`.** Absent means none. Antigravity already
 ships progress lines and nothing else.
+
+**Clients key providers by `id`, never by array index.** The transform drops a
+provider whose header it cannot read -- no `providerId`, no `displayName`, an
+unparseable `fetchedAt` -- rather than inventing a placeholder, and that shifts
+every provider after it one slot down. Position is not a stable handle across
+polls; `id` is.
 
 **KV free tier allows 1,000 writes a day.** The agent dedupes by comparing the
 serialised body, which is why the body has no clock in it.

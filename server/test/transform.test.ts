@@ -126,6 +126,27 @@ describe('transformOpenUsage', () => {
     expect(out.providers[0]!.chart).toHaveLength(before);
   });
 
+  it('drops a provider with a malformed header, shifting every later index down', () => {
+    const doctored = structuredClone(raw);
+    // The middle one, so the shift is visible: killing the last would only shorten.
+    expect(doctored[1].providerId).toBe('codex');
+    delete doctored[1].providerId;
+    const out = transformOpenUsage(doctored);
+    expect(validatePushBody(out).ok).toBe(true);
+    // codex is gone and antigravity has slid into the slot it used to hold, so
+    // providers[1] now names a different provider than it did last poll. This is
+    // the drop policy working as intended and it is why clients key by id.
+    expect(out.providers.map((p) => p.id)).toEqual(['claude', 'antigravity']);
+  });
+
+  it('drops a provider with an unparseable fetchedAt rather than emitting NaN', () => {
+    const doctored = structuredClone(raw);
+    doctored[1].fetchedAt = 'not a date';
+    const out = transformOpenUsage(doctored);
+    expect(validatePushBody(out).ok).toBe(true);
+    expect(out.providers.map((p) => p.id)).toEqual(['claude', 'antigravity']);
+  });
+
   it('carries no clock of its own, so it is byte-stable across calls', () => {
     expect(JSON.stringify(transformOpenUsage(raw))).toBe(
       JSON.stringify(transformOpenUsage(raw)),
