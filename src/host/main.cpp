@@ -91,6 +91,63 @@ static int render_sweep_sheet(const char* path, const char* label_prefix,
     return 0;
 }
 
+// bloom_strength alone saturates almost immediately (blur * strength / 255,
+// clamped): a mostly-black screen with thin bright strokes stays dim under
+// blur regardless of strength. bloom_radius controls how far light actually
+// spreads, which is what reads as glow. This sheet varies both: radius by
+// row (1, 2, 3), strength by column (80, 160, 240), and prints both the lit
+// pixel count and the summed intensity per tile so a tile maps back to a
+// pair of numbers and a brightness total.
+static int run_contact_bloom_radius() {
+    const int TW = cb::SCREEN_W * 3, TH = cb::SCREEN_H * 3;
+    static uint8_t sheet[static_cast<size_t>(cb::SCREEN_W) * 3 * cb::SCREEN_H * 3];
+    memset(sheet, 0, sizeof sheet);
+
+    const uint8_t radii[3] = {1, 2, 3};
+    const uint8_t strengths[3] = {80, 160, 240};
+
+    printf("bloom radius x strength sweep (lit>=8 count / intensity sum):\n");
+    for (int row = 0; row < 3; row++) {
+        for (int col = 0; col < 3; col++) {
+            cb::EffectParams fx = cb::EffectParams::defaults();
+            fx.bloom_radius = radii[row];
+            fx.bloom_strength = strengths[col];
+
+            cb::Canvas tile(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+            render_reference(tile, fx);
+
+            uint64_t lit = 0, sum = 0;
+            const size_t n = static_cast<size_t>(cb::SCREEN_W) * cb::SCREEN_H;
+            for (size_t p = 0; p < n; p++) {
+                const uint8_t v = g_buf[p];
+                sum += v;
+                if (v >= 8) lit++;
+            }
+            printf("  R=%d S=%d: lit=%llu sum=%llu\n", radii[row], strengths[col],
+                   static_cast<unsigned long long>(lit), static_cast<unsigned long long>(sum));
+
+            // Labeled after post_process (and after metrics are taken, so
+            // the label's own pixels don't skew the counts) in the chart
+            // band's dark top-right corner, same spot the other sheets use.
+            char label[24];
+            snprintf(label, sizeof label, "R=%d S=%d", radii[row], strengths[col]);
+            const int lw = cb::text_width(label, 1);
+            const int lx = cb::MARGIN + (cb::SCREEN_W - 2 * cb::MARGIN) - 3 - lw;
+            cb::draw_text(tile, lx, cb::CHART_Y + 3, label, 255, 1);
+
+            const int ox = col * cb::SCREEN_W, oy = row * cb::SCREEN_H;
+            for (int y = 0; y < cb::SCREEN_H; y++)
+                memcpy(sheet + static_cast<size_t>(oy + y) * TW + ox,
+                       g_buf + static_cast<size_t>(y) * cb::SCREEN_W, cb::SCREEN_W);
+        }
+    }
+
+    cb::Canvas s(sheet, TW, TH);
+    if (!cbhost::write_png_from_canvas("out/contact-bloom-radius.png", s)) return 1;
+    printf("wrote out/contact-bloom-radius.png\n");
+    return 0;
+}
+
 static int run_contact() {
     int rc = 0;
     // The important one: is bloom invisible, or does it run away?
@@ -98,6 +155,7 @@ static int run_contact() {
                              &cb::EffectParams::bloom_strength, 31);
     rc |= render_sweep_sheet("out/contact-scanlines.png", "SCAN",
                              &cb::EffectParams::scanline_depth, 14);
+    rc |= run_contact_bloom_radius();
     return rc;
 }
 
