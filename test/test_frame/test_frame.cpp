@@ -18,11 +18,28 @@ static const size_t N = static_cast<size_t>(cb::SCREEN_W) * cb::SCREEN_H;
 static uint8_t accum_buf[cb::SCREEN_W * cb::SCREEN_H];
 static uint8_t out_buf[cb::SCREEN_W * cb::SCREEN_H];
 static uint8_t snapshot_buf[cb::SCREEN_W * cb::SCREEN_H];
+static uint8_t stream_accum_buf[cb::SCREEN_W * cb::SCREEN_H];
+static uint8_t stream_out_buf[cb::SCREEN_W * cb::SCREEN_H];
+static uint8_t stream_row[cb::SCREEN_W];
 static uint8_t ring[9 * cb::SCREEN_W];
 
 static void one_frame(cb::Canvas& accum, cb::Canvas& out, uint32_t frame) {
     cb::render_frame(accum, out, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS,
                      "14:44", cb::EffectParams::defaults(), frame, ring, sizeof ring);
+}
+
+// Reassembles the streamed rows so they can be compared with the canvas the
+// other overload fills. The device does not do this -- it pushes each row to
+// the panel and keeps nothing.
+static void collect_row(void* ctx, int y, const uint8_t* row, int w) {
+    uint8_t* base = static_cast<uint8_t*>(ctx);
+    memcpy(base + static_cast<size_t>(y) * w, row, static_cast<size_t>(w));
+}
+
+static void one_frame_streamed(cb::Canvas& accum, uint8_t* dst, uint32_t frame) {
+    cb::render_frame(accum, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS,
+                     "14:44", cb::EffectParams::defaults(), frame, ring, sizeof ring,
+                     stream_row, collect_row, dst);
 }
 
 // Drawing blends with max() and the fixture is static, so the accumulator
@@ -86,6 +103,29 @@ void test_post_processing_never_touches_the_accumulator(void) {
     TEST_ASSERT_TRUE(memcmp(out_buf, accum_buf, N) != 0);
 }
 
+// The device runs the streaming overload and the host runs the canvas one, so
+// they have to agree byte for byte -- otherwise the golden pins only half the
+// code that ships. Several frames, because flicker is keyed on the frame
+// counter and the bloom ring carries state between rows.
+void test_streaming_and_canvas_overloads_agree(void) {
+    memset(accum_buf, 0, N);
+    memset(out_buf, 0, N);
+    cb::Canvas accum(accum_buf, cb::SCREEN_W, cb::SCREEN_H);
+    cb::Canvas out(out_buf, cb::SCREEN_W, cb::SCREEN_H);
+    for (uint32_t f = 0; f < 4; f++) one_frame(accum, out, f);
+    memcpy(snapshot_buf, accum_buf, N);
+
+    memset(stream_accum_buf, 0, N);
+    memset(stream_out_buf, 0, N);
+    cb::Canvas stream_accum(stream_accum_buf, cb::SCREEN_W, cb::SCREEN_H);
+    for (uint32_t f = 0; f < 4; f++) one_frame_streamed(stream_accum, stream_out_buf, f);
+
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(out_buf, stream_out_buf, N);
+    // And the accumulator is left in exactly the same state, so the fixed-point
+    // test above covers the streaming path too.
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(snapshot_buf, stream_accum_buf, N);
+}
+
 // A mismatched output canvas must leave the caller's memory alone rather
 // than writing past it -- there is no MMU on the device.
 void test_mismatched_output_canvas_is_left_alone(void) {
@@ -108,5 +148,6 @@ int main(int, char**) {
     RUN_TEST(test_frame_loop_reaches_a_fixed_point);
     RUN_TEST(test_post_processing_never_touches_the_accumulator);
     RUN_TEST(test_mismatched_output_canvas_is_left_alone);
+    RUN_TEST(test_streaming_and_canvas_overloads_agree);
     return UNITY_END();
 }

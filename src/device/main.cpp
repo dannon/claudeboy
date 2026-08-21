@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <string.h>
+#include "esp_heap_caps.h"
 #include "core/canvas.h"
 #include "core/crt.h"
 #include "core/fixture.h"
@@ -11,26 +12,30 @@
 
 static TFT_eSPI tft;
 
-static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];   // the one accumulator
-// The post-processed copy that actually gets pushed. cb::render_frame() owns
-// the accumulator/copy split and the reason for it -- see core/frame.h.
-//
-// This buffer is heap-allocated in setup(), NOT a second static array like
-// g_buf: this board's static .bss/.data DRAM segment (dram0_0_seg) is only
-// ~124,580 bytes and the Arduino/TFT_eSPI framework already statically
-// consumes ~102,612 of that (~83%), leaving ~21,968 bytes of static
-// headroom -- nowhere near the 76,800 bytes SCREEN_W*SCREEN_H needs. The
-// linker refuses to build a second static buffer that size ("region
-// `dram0_0_seg' overflowed by 54840 bytes"). Free HEAP (~270KB) is a
-// separate, much larger pool that a compile-time static array cannot draw
-// from, which is why a `static uint8_t g_shown[...]` does not fit even
-// though free heap looks comfortable. `new` here instead.
-static uint8_t* g_shown = nullptr;
+static const size_t BUF_BYTES = (size_t)cb::SCREEN_W * cb::SCREEN_H;
+
+static uint8_t* g_buf = nullptr;   // the one and only framebuffer, the accumulator
 static uint8_t g_ring[9 * cb::SCREEN_W];
+static uint8_t g_out_row[cb::SCREEN_W];   // one post-processed row, on its way to the panel
 static uint16_t g_line[cb::SCREEN_W];
 static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
 
 static uint32_t g_frame = 0;
+
+// cb::render_frame() hands each finished row here instead of filling a second
+// canvas -- see core/frame.h for why post-processing stays off the
+// accumulator. The address window is set once per frame, so rows must arrive
+// in order and each pushPixels() simply continues where the last left off.
+static void push_row(void*, int, const uint8_t* row, int w) {
+    for (int x = 0; x < w; x++) g_line[x] = g_palette[row[x]];
+    tft.pushPixels(g_line, w);
+}
+
+static void print_heap(const char* when) {
+    Serial.printf("claudeboy: %s, MALLOC_CAP_8BIT free %u bytes, largest block %u bytes\n",
+                  when, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
 
 // core/ has no clock of its own, so hand render_frame() ours for the
 // per-stage timing. micros() returns unsigned long, a distinct type from
@@ -62,7 +67,21 @@ static const cb::UsageSnapshot& live_snapshot(int64_t now) {
 void setup() {
     Serial.begin(115200);
     delay(100);
-    Serial.printf("claudeboy: free heap %u bytes\n", (unsigned)ESP.getFreeHeap());
+    // ESP.getFreeHeap() counts ~73KB of 32-bit-only IRAM that cannot back a
+    // uint8_t[], so it reports room that does not exist for a framebuffer.
+    print_heap("boot");
+
+    // Before anything touches the network: the accumulator needs one
+    // contiguous 76,800-byte run, and the WiFi/TLS stacks fragment the heap
+    // once they start, so a later allocation can fail while the free total
+    // still looks comfortable.
+    g_buf = new uint8_t[BUF_BYTES];
+    if (!g_buf) {
+        Serial.println("claudeboy: FATAL: framebuffer allocation failed");
+        while (true) delay(1000);
+    }
+    memset(g_buf, 0, BUF_BYTES);
+    print_heap("after framebuffer");
 
     pinMode(TFT_BL, OUTPUT);
     digitalWrite(TFT_BL, HIGH);
@@ -72,18 +91,7 @@ void setup() {
     tft.setRotation(3);          // landscape, origin top-left with USB-C at top
     tft.fillScreen(TFT_BLACK);
 
-    memset(g_buf, 0, sizeof g_buf);
     cb::palette_build_rgb565_table(g_palette);
-
-    g_shown = new uint8_t[cb::SCREEN_W * cb::SCREEN_H];
-    if (!g_shown) {
-        Serial.println("claudeboy: FATAL: g_shown heap allocation failed");
-        while (true) delay(1000);
-    }
-    memset(g_shown, 0, cb::SCREEN_W * cb::SCREEN_H);
-
-    Serial.printf("claudeboy: after buffers, free heap %u bytes\n",
-                  (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {
@@ -96,32 +104,21 @@ void loop() {
     char clk[8];
     cb::format_clock(now, clk, sizeof clk);   // UTC; phase 2 brings a real zone
 
-    cb::Canvas shown(g_shown, cb::SCREEN_W, cb::SCREEN_H);
     cb::FrameTiming timing{now_us, 0, 0};
     const uint32_t t_frame_start = micros();
-    cb::render_frame(c, shown, live_snapshot(now), 0, now, clk, fx,
-                     g_frame, g_ring, sizeof g_ring, &timing);
-    const uint32_t t_post_end = micros();
-
     tft.startWrite();
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
-    for (int y = 0; y < cb::SCREEN_H; y++) {
-        const uint8_t* row = g_shown + (size_t)y * cb::SCREEN_W;
-        for (int x = 0; x < cb::SCREEN_W; x++) g_line[x] = g_palette[row[x]];
-        tft.pushPixels(g_line, cb::SCREEN_W);
-    }
+    cb::render_frame(c, live_snapshot(now), 0, now, clk, fx,
+                     g_frame, g_ring, sizeof g_ring,
+                     g_out_row, push_row, nullptr, &timing);
     tft.endWrite();
-    const uint32_t t_push_end = micros();
+    const uint32_t total_us = micros() - t_frame_start;
 
-    const uint32_t render_us = timing.render_us;
-    const uint32_t post_us = timing.post_us;
-    const uint32_t push_us = t_push_end - t_post_end;
-    const uint32_t total_us = t_push_end - t_frame_start;
-
-    // Print roughly every 30 frames so the serial output stays readable.
-    if ((g_frame % 30) == 0) {
-        Serial.printf("claudeboy: render=%uus post=%uus push=%uus total=%uus\n",
-                      (unsigned)render_us, (unsigned)post_us, (unsigned)push_us,
+    // Post-processing and the SPI push are one stage now: each row goes
+    // straight to the panel as it is finished, so they cannot be timed apart.
+    if ((g_frame % 30) == 0) {   // roughly every 30 frames, so serial stays readable
+        Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus\n",
+                      (unsigned)timing.render_us, (unsigned)timing.post_us,
                       (unsigned)total_us);
     }
 
