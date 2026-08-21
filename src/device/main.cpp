@@ -29,7 +29,8 @@ void setup() {
     pinMode(TFT_BL, OUTPUT);
     digitalWrite(TFT_BL, HIGH);
     tft.init();
-    tft.setRotation(1);              // landscape 320x240
+    tft.setSwapBytes(true);          // ILI9341 wants high byte first; ESP32 is little-endian
+    tft.setRotation(3);              // landscape 320x240, origin top-left with USB-C at top
     tft.fillScreen(TFT_BLACK);
 
     memset(g_buf, 0, sizeof g_buf);
