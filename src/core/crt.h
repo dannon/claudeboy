@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 #include "core/canvas.h"
 
 namespace cb {
@@ -21,5 +22,13 @@ struct EffectParams {
 uint8_t flicker_gain(const EffectParams& p, uint32_t frame);
 
 void apply_gain(Canvas& c, uint8_t gain);
+
+// Bytes of scratch apply_bloom() needs: (2*radius+1) rows of `width`.
+size_t bloom_ring_bytes(int radius, int width);
+
+// Adds a blurred copy of the image back over itself, brightening only.
+// Uses a ring of horizontally-blurred rows, never a second framebuffer.
+// If ring_bytes is too small the call does nothing.
+void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_bytes);
 
 }  // namespace cb

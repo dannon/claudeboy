@@ -81,6 +81,53 @@ void test_apply_gain_scales(void) {
     TEST_ASSERT_UINT8_WITHIN(2, 100, c.at(1, 1));   // full gain is a no-op
 }
 
+void test_ring_size_matches_radius(void) {
+    TEST_ASSERT_EQUAL_UINT32(5u * 32u, (uint32_t)cb::bloom_ring_bytes(2, 32));
+    TEST_ASSERT_EQUAL_UINT32(9u * 32u, (uint32_t)cb::bloom_ring_bytes(4, 32));
+}
+
+void test_bloom_spreads_a_point(void) {
+    cb::Canvas c = mkc();
+    c.plot(16, 8, 255);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.bloom_radius = 2; p.bloom_strength = 255;
+    uint8_t ring[9 * 32];
+    cb::apply_bloom(c, p, ring, sizeof ring);
+    TEST_ASSERT_TRUE(c.at(16, 8) >= 200);      // centre stays bright
+    TEST_ASSERT_TRUE(c.at(17, 8) > 0);          // light bleeds sideways
+    TEST_ASSERT_TRUE(c.at(16, 9) > 0);          // and vertically
+    TEST_ASSERT_TRUE(c.at(17, 8) < c.at(16, 8));
+}
+
+void test_bloom_radius_zero_is_a_noop(void) {
+    cb::Canvas c = mkc();
+    c.plot(16, 8, 255);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.bloom_radius = 0;
+    uint8_t ring[9 * 32];
+    cb::apply_bloom(c, p, ring, sizeof ring);
+    TEST_ASSERT_EQUAL_UINT8(255, c.at(16, 8));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(17, 8));
+}
+
+void test_bloom_never_darkens(void) {
+    cb::Canvas c = mkc();
+    for (int x = 0; x < 32; x++) c.plot(x, 4, 120);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    uint8_t ring[9 * 32];
+    cb::apply_bloom(c, p, ring, sizeof ring);
+    for (int x = 0; x < 32; x++) TEST_ASSERT_TRUE(c.at(x, 4) >= 120);
+}
+
+void test_bloom_with_undersized_ring_is_skipped(void) {
+    cb::Canvas c = mkc();
+    c.plot(16, 8, 255);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    uint8_t tiny[8];
+    cb::apply_bloom(c, p, tiny, sizeof tiny);
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(17, 8));   // refused rather than corrupted
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_zero_intensity_is_black);
@@ -94,5 +141,10 @@ int main(int, char**) {
     RUN_TEST(test_flicker_varies_between_frames);
     RUN_TEST(test_zero_flicker_amount_is_constant);
     RUN_TEST(test_apply_gain_scales);
+    RUN_TEST(test_ring_size_matches_radius);
+    RUN_TEST(test_bloom_spreads_a_point);
+    RUN_TEST(test_bloom_radius_zero_is_a_noop);
+    RUN_TEST(test_bloom_never_darkens);
+    RUN_TEST(test_bloom_with_undersized_ring_is_skipped);
     return UNITY_END();
 }

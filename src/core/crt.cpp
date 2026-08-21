@@ -42,4 +42,59 @@ void apply_gain(Canvas& c, uint8_t gain) {
         d[i] = static_cast<uint8_t>((static_cast<uint32_t>(d[i]) * gain) / 255u);
 }
 
+size_t bloom_ring_bytes(int radius, int width) {
+    if (radius < 0) radius = 0;
+    return static_cast<size_t>(2 * radius + 1) * static_cast<size_t>(width);
+}
+
+void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_bytes) {
+    const int r = p.bloom_radius;
+    if (r <= 0 || p.bloom_strength == 0 || !ring) return;
+
+    const int w = c.width(), h = c.height();
+    const int rows = 2 * r + 1;
+    if (ring_bytes < bloom_ring_bytes(r, w)) return;
+
+    const int taps = rows;
+    uint8_t* buf = c.data();
+
+    // Horizontally blur source row `sy` into ring slot `sy % rows`.
+    auto load_row = [&](int sy) {
+        uint8_t* dst = ring + static_cast<size_t>(sy % rows) * w;
+        const uint8_t* src = buf + static_cast<size_t>(sy) * w;
+        for (int x = 0; x < w; x++) {
+            uint32_t acc = 0;
+            for (int k = -r; k <= r; k++) {
+                int sx = x + k;
+                if (sx < 0) sx = 0;
+                if (sx >= w) sx = w - 1;
+                acc += src[sx];
+            }
+            dst[x] = static_cast<uint8_t>(acc / taps);
+        }
+    };
+
+    for (int y = 0; y < h + r; y++) {
+        if (y < h) load_row(y);
+
+        const int out_y = y - r;          // lags behind so its window is full
+        if (out_y < 0) continue;
+
+        uint8_t* out = buf + static_cast<size_t>(out_y) * w;
+        for (int x = 0; x < w; x++) {
+            uint32_t acc = 0;
+            for (int k = -r; k <= r; k++) {
+                int sy = out_y + k;
+                if (sy < 0) sy = 0;
+                if (sy >= h) sy = h - 1;
+                acc += ring[static_cast<size_t>(sy % rows) * w + x];
+            }
+            const uint32_t blur = acc / taps;
+            const uint32_t add = (blur * p.bloom_strength) / 255u;
+            const uint32_t v = out[x] + add;
+            out[x] = static_cast<uint8_t>(v > 255u ? 255u : v);
+        }
+    }
+}
+
 }  // namespace cb
