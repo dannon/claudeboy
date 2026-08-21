@@ -10,5 +10,8 @@
     // readFileSync(new URL(...)) stops typechecking. ^22 is the node we run.
     "types": ["@cloudflare/workers-types", "node"]
   },
-  "include": ["**/*.ts", "../src/**/*.ts"]
+  // ../src/**/*.ts and the vitest config are pulled in here so that between this
+  // project and the root one every .ts file in the workspace is checked by
+  // something. `npm run typecheck` runs both; see ../README.md.
+  "include": ["**/*.ts", "../src/**/*.ts", "../vitest.config.ts"]
 }
