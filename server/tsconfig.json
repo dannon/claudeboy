@@ -16,5 +16,11 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // agent.ts is the Mac-side poller, not Worker code: it needs node:path,
+  // node:url and process. Typing it here would mean node-typing the whole
+  // project and losing the guard above, so it is checked by
+  // test/tsconfig.json instead, which already pulls in ../src/**/*.ts with
+  // node types. `npm run typecheck` runs both projects.
+  "exclude": ["src/agent.ts"]
 }

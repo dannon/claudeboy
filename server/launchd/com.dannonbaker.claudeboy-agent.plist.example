@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Copy to ~/Library/LaunchAgents/com.dannonbaker.claudeboy-agent.plist, fill in
+  the two REPLACE_ values, then:
+      launchctl load ~/Library/LaunchAgents/com.dannonbaker.claudeboy-agent.plist
+  This file is a template on purpose: the real one holds the push token and must
+  never be committed.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dannonbaker.claudeboy-agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>--experimental-strip-types</string>
+    <string>REPLACE_WITH_ABSOLUTE_PATH/claudeboy/server/src/agent.ts</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CLAUDEBOY_PUSH_URL</key>
+    <string>https://claudeboy.dannonbaker.com/v1/push</string>
+    <key>CLAUDEBOY_PUSH_TOKEN</key>
+    <string>REPLACE_WITH_PUSH_TOKEN</string>
+    <key>CLAUDEBOY_INTERVAL_SEC</key>
+    <string>60</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/claudeboy-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/claudeboy-agent.err</string>
+</dict>
+</plist>
