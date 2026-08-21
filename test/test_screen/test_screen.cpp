@@ -14,6 +14,30 @@ static int lit_in(const cb::Canvas& c, int x0, int y0, int w, int h) {
             if (c.at(x, y)) n++;
     return n;
 }
+static long sum_in(const cb::Canvas& c, int x0, int y0, int w, int h) {
+    long s = 0;
+    for (int y = y0; y < y0 + h; y++)
+        for (int x = x0; x < x0 + w; x++) s += c.at(x, y);
+    return s;
+}
+
+static const int64_t REF  = cb::FIXTURE_REFERENCE_MS;
+static const int64_t MIN  = 60LL * 1000;
+static const int64_t HOUR = 60 * MIN;
+
+// The band the numbers live in: gauge cells through the bottom of the chart.
+static const int DATA_Y = cb::CELL_Y;
+static const int DATA_H = cb::CHART_Y + cb::CHART_H - cb::CELL_Y;
+
+// The fixture provider with its fetch timestamp moved. Static, because the
+// snapshot handed back only points at it.
+static cb::Provider g_sp;
+static cb::UsageSnapshot with_fetched_at(int64_t fetched_at_ms) {
+    g_sp = cb::fixture_snapshot().providers[0];
+    g_sp.fetched_at_ms = fetched_at_ms;
+    return cb::UsageSnapshot{&g_sp, 1, REF};
+}
+static cb::UsageSnapshot aged(int64_t age_ms) { return with_fetched_at(REF - age_ms); }
 
 void test_format_duration_minutes(void) {
     char b[16]; cb::format_duration(45LL * 60 * 1000, b, sizeof b);
@@ -148,7 +172,7 @@ void test_tallest_bar_is_the_peak_day(void) {
 
 void test_empty_chart_does_not_crash(void) {
     cb::Canvas c = mks();
-    cb::Provider empty{"x", "X", nullptr, 0, nullptr, 0, nullptr, 0};
+    cb::Provider empty{"x", "X", "", 0, nullptr, 0, nullptr, 0, nullptr, 0};
     cb::draw_chart(c, empty);
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H));
 }
@@ -225,6 +249,192 @@ void test_unknown_state_draws_no_tick(void) {
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 31, bar_w, 4));
 }
 
+// --- staleness --------------------------------------------------------------
+
+void test_freshness_boundaries(void) {
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(aged(0), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(aged(10 * MIN - 1), REF));
+    // Both boundaries belong to the gentler state: exactly ten minutes is
+    // stale, exactly two hours is still stale and not yet a lost signal.
+    TEST_ASSERT_EQUAL(cb::Freshness::Stale, cb::freshness_of(aged(10 * MIN), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::Stale, cb::freshness_of(aged(10 * MIN + 1), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::Stale, cb::freshness_of(aged(2 * HOUR - 1), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::Stale, cb::freshness_of(aged(2 * HOUR), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::SignalLost, cb::freshness_of(aged(2 * HOUR + 1), REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::SignalLost, cb::freshness_of(aged(30 * HOUR), REF));
+}
+
+void test_nothing_ever_fetched_is_no_signal(void) {
+    TEST_ASSERT_EQUAL(cb::Freshness::NoSignal, cb::freshness_of(with_fetched_at(0), REF));
+    // What the board actually holds before its first successful poll.
+    cb::UsageSnapshot none{};
+    TEST_ASSERT_EQUAL(cb::Freshness::NoSignal, cb::freshness_of(none, REF));
+    TEST_ASSERT_EQUAL_INT64(0, cb::newest_fetched_at_ms(none));
+    TEST_ASSERT_EQUAL_INT64(0, cb::snapshot_age_ms(none, REF));
+}
+
+void test_the_newest_provider_sets_the_state(void) {
+    cb::Provider p[2];
+    p[0] = cb::fixture_snapshot().providers[0];
+    p[1] = cb::fixture_snapshot().providers[0];
+    cb::UsageSnapshot s{p, 2, REF};
+
+    p[0].fetched_at_ms = REF - 3 * HOUR;
+    p[1].fetched_at_ms = REF - 1 * MIN;
+    TEST_ASSERT_EQUAL_INT64(REF - 1 * MIN, cb::newest_fetched_at_ms(s));
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(s, REF));
+
+    // Order in the array must not decide it.
+    p[0].fetched_at_ms = REF - 1 * MIN;
+    p[1].fetched_at_ms = REF - 3 * HOUR;
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(s, REF));
+
+    // A provider that has never reported at all must not drag the rest down.
+    p[1].fetched_at_ms = 0;
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(s, REF));
+}
+
+void test_a_fetch_ahead_of_our_clock_is_not_a_negative_age(void) {
+    // The board's clock comes from serverTime plus local millis, so it can sit
+    // slightly behind the instant a provider was read.
+    const cb::UsageSnapshot s = aged(-5 * MIN);
+    TEST_ASSERT_EQUAL_INT64(0, cb::snapshot_age_ms(s, REF));
+    TEST_ASSERT_EQUAL(cb::Freshness::Fresh, cb::freshness_of(s, REF));
+}
+
+void test_staleness_annotations(void) {
+    char b[24];
+    TEST_ASSERT_FALSE(cb::format_staleness(cb::Freshness::Fresh, 0, b, sizeof b));
+    TEST_ASSERT_EQUAL_STRING("", b);
+
+    TEST_ASSERT_TRUE(cb::format_staleness(cb::Freshness::Stale, 24 * MIN, b, sizeof b));
+    TEST_ASSERT_EQUAL_STRING("STALE 24m", b);
+    // The ages at the boundaries, through the one duration formatter.
+    cb::format_staleness(cb::Freshness::Stale, 10 * MIN, b, sizeof b);
+    TEST_ASSERT_EQUAL_STRING("STALE 10m", b);
+    cb::format_staleness(cb::Freshness::Stale, 2 * HOUR, b, sizeof b);
+    TEST_ASSERT_EQUAL_STRING("STALE 2h00m", b);
+    cb::format_staleness(cb::Freshness::SignalLost, 3 * HOUR, b, sizeof b);
+    TEST_ASSERT_EQUAL_STRING("SIGNAL LOST 3h00m", b);
+
+    TEST_ASSERT_TRUE(cb::format_staleness(cb::Freshness::NoSignal, 0, b, sizeof b));
+    TEST_ASSERT_EQUAL_STRING("NO SIGNAL", b);
+}
+
+void test_the_longest_annotation_clears_the_footer_value(void) {
+    char b[24];
+    cb::format_staleness(cb::Freshness::SignalLost, 500LL * 86400 * 1000, b, sizeof b);
+    TEST_ASSERT_EQUAL_STRING("SIGNAL LOST 99d+", b);
+    // Footer text is left-anchored and right-anchored; the widest value the
+    // live payload carries must not run into the widest annotation.
+    const int right_x = cb::SCREEN_W - cb::MARGIN - cb::text_width(b, 1);
+    TEST_ASSERT_TRUE(right_x > cb::MARGIN + cb::text_width("$264.21 ? 332.3M tokens", 1));
+}
+
+// mks() hands every canvas the same static buffer, so each measurement has to
+// be taken before the next render begins.
+static long data_sum(const cb::UsageSnapshot& s) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, s, 0, REF, "14:44");
+    return sum_in(c, 0, DATA_Y, cb::SCREEN_W, DATA_H);
+}
+static int data_lit(const cb::UsageSnapshot& s) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, s, 0, REF, "14:44");
+    return lit_in(c, 0, DATA_Y, cb::SCREEN_W, DATA_H);
+}
+static int footer_right_lit(const cb::UsageSnapshot& s) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, s, 0, REF, "14:44");
+    return lit_in(c, cb::SCREEN_W / 2, cb::FOOT_Y, cb::SCREEN_W / 2, cb::FONT_H);
+}
+
+void test_fresh_numbers_are_drawn_at_full_brightness(void) {
+    // Nothing about a fresh frame changes as it ages up to the ten-minute mark.
+    const long plain = data_sum(cb::fixture_snapshot());
+    TEST_ASSERT_EQUAL_INT64(plain, data_sum(aged(0)));
+    TEST_ASSERT_EQUAL_INT64(plain, data_sum(aged(10 * MIN - 1)));
+}
+
+void test_stale_render_dims_the_numbers_without_erasing_them(void) {
+    const long bright = data_sum(aged(0));
+    const int  lit    = data_lit(aged(0));
+    const long dimmed = data_sum(aged(24 * MIN));
+
+    TEST_ASSERT_TRUE(dimmed < bright);
+    // Turned down, not switched off -- the last known numbers stay readable,
+    // and every pixel that was lit is still lit.
+    TEST_ASSERT_TRUE(dimmed > bright / 4);
+    TEST_ASSERT_EQUAL_INT(lit, data_lit(aged(24 * MIN)));
+
+    TEST_ASSERT_TRUE(data_sum(aged(3 * HOUR)) < bright);
+}
+
+void test_the_annotation_is_not_dimmed_with_what_it_annotates(void) {
+    cb::Canvas stale = mks();
+    cb::render_ambient(stale, aged(24 * MIN), 0, REF, "14:44");
+    // draw_footer draws its right-hand text at I_NORMAL; a dim pass reaching
+    // the footer would knock the peak down.
+    int peak = 0;
+    for (int y = cb::FOOT_Y; y < cb::FOOT_Y + cb::FONT_H; y++)
+        for (int x = cb::SCREEN_W / 2; x < cb::SCREEN_W; x++)
+            if (stale.at(x, y) > peak) peak = stale.at(x, y);
+    TEST_ASSERT_EQUAL_INT(cb::I_NORMAL, peak);
+
+    // and it really replaced the fresh-state text rather than sitting under it
+    const int annotated = footer_right_lit(aged(24 * MIN));
+    TEST_ASSERT_TRUE(annotated != footer_right_lit(aged(0)));
+}
+
+void test_no_signal_shows_no_numbers_at_all(void) {
+    cb::Canvas c = mks();
+    cb::render_ambient(c, with_fetched_at(0), 0, REF, "14:44");
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H));
+    // chart bars grow from the floor of the chart band
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y + cb::CHART_H - 20, cb::SCREEN_W, 20));
+    // no footer value either -- that is a number too
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::FOOT_Y, cb::SCREEN_W, cb::FONT_H));
+    // but the board says why, in the space the numbers would have filled
+    TEST_ASSERT_TRUE(lit_in(c, 0, DATA_Y, cb::SCREEN_W, DATA_H) > 100);
+    // and the frame is still a frame
+    TEST_ASSERT_TRUE(lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H + 1) > 40);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 1) > 100);
+}
+
+void test_an_empty_snapshot_renders_no_signal(void) {
+    cb::Canvas c = mks();
+    cb::UsageSnapshot none{};
+    // provider_index 0 is out of range here; the banner must still be drawn.
+    cb::render_ambient(c, none, 0, REF, "14:44");
+    TEST_ASSERT_TRUE(lit_in(c, 0, DATA_Y, cb::SCREEN_W, DATA_H) > 100);
+}
+
+void test_the_active_plan_rides_with_its_tab(void) {
+    cb::Provider p = cb::fixture_snapshot().providers[0];
+    cb::UsageSnapshot s{&p, 1, REF};
+    const int clock_x = cb::SCREEN_W - cb::MARGIN - cb::text_width("14:44", 1);
+
+    // One shared canvas buffer, so each strip is measured before the next.
+    cb::Canvas c = mks();
+    cb::draw_tabs(c, s, 0, "14:44");
+    const int with_plan = lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H);
+    // nothing runs into the clock
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, clock_x - 6, 0, 6, cb::TAB_H));
+
+    p.plan = "";
+    cb::Canvas bare = mks();
+    cb::draw_tabs(bare, s, 0, "14:44");
+    const int without_plan = lit_in(bare, 0, 0, cb::SCREEN_W, cb::TAB_H);
+    TEST_ASSERT_TRUE(with_plan > without_plan);
+
+    // A plan too long for the room left is dropped rather than drawn under
+    // the clock -- the provider list is server-side and can grow.
+    p.plan = "SOME ABSURDLY LONG PLAN NAME NOBODY WOULD SELL";
+    cb::Canvas crowded = mks();
+    cb::draw_tabs(crowded, s, 0, "14:44");
+    TEST_ASSERT_EQUAL_INT(without_plan, lit_in(crowded, 0, 0, cb::SCREEN_W, cb::TAB_H));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_format_duration_minutes);
@@ -248,5 +458,17 @@ int main(int, char**) {
     RUN_TEST(test_verdict_fits_a_narrow_cell);
     RUN_TEST(test_invalid_pace_draws_no_gauge);
     RUN_TEST(test_unknown_state_draws_no_tick);
+    RUN_TEST(test_freshness_boundaries);
+    RUN_TEST(test_nothing_ever_fetched_is_no_signal);
+    RUN_TEST(test_the_newest_provider_sets_the_state);
+    RUN_TEST(test_a_fetch_ahead_of_our_clock_is_not_a_negative_age);
+    RUN_TEST(test_staleness_annotations);
+    RUN_TEST(test_the_longest_annotation_clears_the_footer_value);
+    RUN_TEST(test_fresh_numbers_are_drawn_at_full_brightness);
+    RUN_TEST(test_stale_render_dims_the_numbers_without_erasing_them);
+    RUN_TEST(test_the_annotation_is_not_dimmed_with_what_it_annotates);
+    RUN_TEST(test_no_signal_shows_no_numbers_at_all);
+    RUN_TEST(test_an_empty_snapshot_renders_no_signal);
+    RUN_TEST(test_the_active_plan_rides_with_its_tab);
     return UNITY_END();
 }

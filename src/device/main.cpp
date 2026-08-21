@@ -47,6 +47,13 @@ static uint32_t now_us() { return static_cast<uint32_t>(micros()); }
 // "SURPLUS 0m" forever. Roll each window forward into the present before
 // drawing, which is what a live feed would have done. Only the device does
 // this: the host stays pinned to the reference instant so the golden holds.
+//
+// fetched_at_ms is deliberately NOT moved with it. Rolling a window keeps a
+// derived reading sane; faking the fetch time would lie about the one thing
+// the staleness display exists to report. So the board reads STALE ten minutes
+// after boot and SIGNAL LOST two hours in, which is the truth about a capture
+// compiled into the firmware, and it exercises the chrome on real hardware
+// until the network fetch replaces this whole function.
 static cb::ProgressLine g_lines[8];
 static cb::Provider g_prov;
 static cb::UsageSnapshot g_live;

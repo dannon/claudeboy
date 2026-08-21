@@ -343,6 +343,8 @@ struct P {
     void parse_provider(Provider& o) {
         o.id = empty();
         o.display_name = empty();
+        o.plan = empty();
+        o.fetched_at_ms = 0;
         o.progress = a.progress ? a.progress + prog_n : nullptr;  o.progress_count = 0;
         o.text     = a.text_lines ? a.text_lines + text_n : nullptr; o.text_count = 0;
         o.chart    = a.chart ? a.chart + chart_n : nullptr;        o.chart_count = 0;
@@ -352,11 +354,18 @@ struct P {
             const char* kb; const char* ke;
             if (!scan_string(kb, ke)) return;
             if (!eat(':')) { fail(); return; }
-            if (key_is(kb, ke, "id") || key_is(kb, ke, "displayName")) {
+            if (key_is(kb, ke, "id") || key_is(kb, ke, "displayName") ||
+                key_is(kb, ke, "plan")) {
                 const char* b; const char* e;
                 if (!scan_string(b, e)) return;
                 const char* s = store(b, e);
-                if (key_is(kb, ke, "id")) o.id = s; else o.display_name = s;
+                if (key_is(kb, ke, "id")) o.id = s;
+                else if (key_is(kb, ke, "displayName")) o.display_name = s;
+                else o.plan = s;
+            } else if (key_is(kb, ke, "fetchedAt")) {
+                int64_t v = 0;
+                if (!number(v)) return;
+                o.fetched_at_ms = to_ms(v);
             } else if (key_is(kb, ke, "progress")) {
                 parse_progress_array(o);
                 if (bad) return;

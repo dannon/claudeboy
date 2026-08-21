@@ -1,8 +1,44 @@
 #include "core/screen.h"
 #include <stdio.h>
 #include <string.h>
+#include "core/fastdiv.h"
 
 namespace cb {
+
+int64_t newest_fetched_at_ms(const UsageSnapshot& snap) {
+    int64_t newest = 0;
+    for (int i = 0; snap.providers && i < snap.provider_count; i++)
+        if (snap.providers[i].fetched_at_ms > newest) newest = snap.providers[i].fetched_at_ms;
+    return newest;
+}
+
+int64_t snapshot_age_ms(const UsageSnapshot& snap, int64_t now_ms) {
+    const int64_t newest = newest_fetched_at_ms(snap);
+    if (newest <= 0) return 0;
+    // Our clock is serverTime plus local millis, so it can sit a little behind
+    // the instant a provider was read. That is not data from the future.
+    const int64_t age = now_ms - newest;
+    return age > 0 ? age : 0;
+}
+
+Freshness freshness_of(const UsageSnapshot& snap, int64_t now_ms) {
+    if (newest_fetched_at_ms(snap) <= 0) return Freshness::NoSignal;
+    const int64_t age = snapshot_age_ms(snap, now_ms);
+    if (age < STALE_AFTER_MS) return Freshness::Fresh;
+    if (age <= LOST_AFTER_MS)  return Freshness::Stale;
+    return Freshness::SignalLost;
+}
+
+bool format_staleness(Freshness f, int64_t age_ms, char* out, size_t n) {
+    if (!out || n == 0) return false;
+    out[0] = '\0';
+    if (f == Freshness::Fresh) return false;
+    if (f == Freshness::NoSignal) { snprintf(out, n, "NO SIGNAL"); return true; }
+    char dur[12];
+    format_duration(age_ms, dur, sizeof dur);
+    snprintf(out, n, "%s %s", f == Freshness::Stale ? "STALE" : "SIGNAL LOST", dur);
+    return true;
+}
 
 void format_duration(int64_t ms, char* out, size_t n) {
     if (!out || n == 0) return;
@@ -26,6 +62,7 @@ void format_clock(int64_t now_ms, char* out, size_t n) {
 }
 
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock) {
+    const int clock_x = SCREEN_W - MARGIN - (clock ? text_width(clock, 1) : 0);
     int x = MARGIN;
     for (int i = 0; snap.providers && i < snap.provider_count; i++) {
         const char* name = snap.providers[i].display_name;
@@ -36,9 +73,19 @@ void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clo
         // phosphor screen and needs no special case.
         draw_text(c, x, 3, name, i == active ? I_BRIGHT : I_DIM, 1);
         if (i == active) c.hline(x, 3 + FONT_H + 1, w, I_BRIGHT);
-        x += w + 12;
+        x += w;
+        // The plan tier is the only thing on screen saying which account these
+        // numbers belong to, so it rides with the provider it describes. The
+        // provider list is server-side and can grow, so a plan with no room
+        // left is dropped rather than drawn under the clock.
+        const char* plan = snap.providers[i].plan;
+        if (i == active && plan && plan[0]) {
+            const int pw = text_width(plan, 1);
+            if (x + 6 + pw < clock_x - 6) { draw_text(c, x + 6, 3, plan, I_DIM, 1); x += 6 + pw; }
+        }
+        x += 12;
     }
-    if (clock) draw_text(c, SCREEN_W - MARGIN - text_width(clock, 1), 3, clock, I_NORMAL, 1);
+    if (clock) draw_text(c, clock_x, 3, clock, I_NORMAL, 1);
     c.hline(MARGIN, TAB_H, SCREEN_W - 2 * MARGIN, I_RULE);
 }
 
@@ -66,6 +113,32 @@ uint8_t verdict_intensity(PaceState s) {
         case PaceState::Burnout: return I_BRIGHT;
         default:                 return I_DIM;
     }
+}
+
+// Multiplicative, unlike Canvas::decay(): a constant subtract erases the faint
+// parts of a picture and barely touches the bright ones, which reads as damage
+// rather than as the same picture turned down.
+//
+// Run on the accumulator after drawing, this settles instead of compounding:
+// the next frame's draw is a max blend, so every pixel is restored to full
+// before this runs again.
+void dim_band(Canvas& c, int y0, int h, uint8_t scale) {
+    uint8_t* buf = c.data();
+    if (!buf) return;
+    if (y0 < 0) { h += y0; y0 = 0; }
+    if (y0 + h > c.height()) h = c.height() - y0;
+    for (int y = y0; y < y0 + h; y++) {
+        uint8_t* row = buf + static_cast<size_t>(y) * c.width();
+        for (int x = 0; x < c.width(); x++)
+            row[x] = static_cast<uint8_t>(div255(static_cast<uint32_t>(row[x]) * scale));
+    }
+}
+
+// Centred in the band the gauges and the chart would have filled.
+void draw_banner(Canvas& c, const char* s) {
+    const int w = text_width(s, 2);
+    draw_text(c, (SCREEN_W - w) / 2,
+              CELL_Y + (CHART_Y + CHART_H - CELL_Y - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
 }
 
 }  // namespace
@@ -175,14 +248,33 @@ void draw_chart(Canvas& c, const Provider& prov) {
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
                     int64_t now_ms, const char* clock) {
     draw_tabs(c, snap, provider_index, clock);
+
+    const Freshness f = freshness_of(snap, now_ms);
+    char note[24];
+    const bool annotated = format_staleness(f, snapshot_age_ms(snap, now_ms), note, sizeof note);
+
+    // Nothing was ever fetched -- before the first poll of a boot, this is the
+    // zeroed snapshot the board starts with. There are no numbers to show and
+    // no age to put on them, so say that where the numbers would have been.
+    // Checked before the index bounds because that snapshot has no providers
+    // for an index to be valid against.
+    if (f == Freshness::NoSignal) {
+        draw_banner(c, note);
+        draw_footer(c, nullptr, nullptr);
+        return;
+    }
+
     if (!snap.providers || provider_index < 0 || provider_index >= snap.provider_count) return;
 
     const Provider& prov = snap.providers[provider_index];
     draw_cells(c, prov, now_ms);
     draw_chart(c, prov);
+    // Knock the numbers back before the footer goes on, so the annotation
+    // saying how old they are ends up brighter than the numbers themselves.
+    if (f != Freshness::Fresh) dim_band(c, CELL_Y, CHART_Y + CHART_H - CELL_Y, I_STALE_SCALE);
 
     const char* left = (prov.text && prov.text_count > 0) ? prov.text[0].value : "";
-    draw_footer(c, left, "WORKING");
+    draw_footer(c, left, annotated ? note : "WORKING");
 }
 
 }  // namespace cb

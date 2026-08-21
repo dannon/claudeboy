@@ -60,6 +60,9 @@ void test_cyd_fixture_parses(void) {
     TEST_ASSERT_EQUAL_STRING("antigravity", s.providers[2].id);
     TEST_ASSERT_EQUAL_STRING("Claude", s.providers[0].display_name);
     TEST_ASSERT_EQUAL_STRING("Antigravity", s.providers[2].display_name);
+    TEST_ASSERT_EQUAL_STRING("Max 5x", s.providers[0].plan);
+    TEST_ASSERT_EQUAL_STRING("Plus", s.providers[1].plan);
+    TEST_ASSERT_EQUAL_STRING("Pro", s.providers[2].plan);
 
     const cb::Provider& claude = s.providers[0];
     TEST_ASSERT_EQUAL_INT(3, claude.progress_count);
@@ -104,6 +107,12 @@ void test_epoch_seconds_become_milliseconds(void) {
     TEST_ASSERT_EQUAL_INT64(1787576400000LL, s.providers[0].progress[1].resets_at_ms);
     TEST_ASSERT_EQUAL_INT64(604800000LL, s.providers[0].progress[1].period_ms);
     TEST_ASSERT_EQUAL_INT64(1787955324000LL, s.providers[2].progress[3].resets_at_ms);
+
+    // fetchedAt drives the whole staleness display, so it gets the same
+    // seconds-to-milliseconds treatment and none of it is dropped.
+    TEST_ASSERT_EQUAL_INT64(1787350828000LL, s.providers[0].fetched_at_ms);
+    TEST_ASSERT_EQUAL_INT64(1787350827000LL, s.providers[1].fetched_at_ms);
+    TEST_ASSERT_EQUAL_INT64(1787350826000LL, s.providers[2].fetched_at_ms);
 }
 
 void test_watch_fixture_parses(void) {
@@ -139,6 +148,7 @@ void test_every_string_lives_in_the_arena(void) {
         const cb::Provider& p = s.providers[i];
         assert_in_arena(p.id, a);
         assert_in_arena(p.display_name, a);
+        assert_in_arena(p.plan, a);
         for (int j = 0; j < p.progress_count; j++) assert_in_arena(p.progress[j].label, a);
         for (int j = 0; j < p.text_count; j++) {
             assert_in_arena(p.text[j].label, a);
@@ -285,10 +295,13 @@ void test_empty_progress_array_keeps_the_provider(void) {
 }
 
 void test_unknown_keys_are_ignored(void) {
-    // A field added server-side must not break a board in the field.
+    // A field added server-side must not break a board in the field. The keys
+    // the board does read sit either side of them, so a mis-skipped value
+    // shows up as a wrong number rather than a silent pass.
     const char* j = "{\"serverTime\":1787350883,\"schema\":2,\"flags\":{\"beta\":true},"
                     "\"providers\":[{\"id\":\"claude\",\"displayName\":\"Claude\","
-                    "\"plan\":\"Max 5x\",\"fetchedAt\":1787350828,\"nested\":[1,[2,{\"a\":null}]],"
+                    "\"plan\":\"Max 5x\",\"nested\":[1,[2,{\"a\":null}]],"
+                    "\"fetchedAt\":1787350828,"
                     "\"progress\":[{\"label\":\"Session\",\"used\":38,\"limit\":100,"
                     "\"resetsAt\":1787360400,\"periodSec\":18000,\"colour\":\"green\"}]}],"
                     "\"trailing\":\"ignored\"}";
@@ -300,6 +313,22 @@ void test_unknown_keys_are_ignored(void) {
     TEST_ASSERT_EQUAL_STRING("Session", s.providers[0].progress[0].label);
     TEST_ASSERT_EQUAL_INT64(1787360400000LL, s.providers[0].progress[0].resets_at_ms);
     TEST_ASSERT_EQUAL_INT64(1787350883000LL, s.server_time_ms);
+    TEST_ASSERT_EQUAL_STRING("Max 5x", s.providers[0].plan);
+    TEST_ASSERT_EQUAL_INT64(1787350828000LL, s.providers[0].fetched_at_ms);
+}
+
+void test_a_provider_with_no_plan_or_fetched_at(void) {
+    // Both are optional on the wire. plan must still be a readable in-arena
+    // string -- the tab strip dereferences it -- and a missing fetchedAt has
+    // to be zero, which is what the screen reads as "never fetched".
+    const char* j = "{\"serverTime\":1787350883,\"providers\":["
+                    "{\"id\":\"claude\",\"displayName\":\"Claude\",\"progress\":[]}]}";
+    cb::ParseArena a = full_arena();
+    cb::UsageSnapshot s{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Ok, cb::parse_snapshot(j, strlen(j), a, s));
+    assert_in_arena(s.providers[0].plan, a);
+    TEST_ASSERT_EQUAL_STRING("", s.providers[0].plan);
+    TEST_ASSERT_EQUAL_INT64(0LL, s.providers[0].fetched_at_ms);
 }
 
 void test_escapes_are_decoded(void) {
@@ -410,6 +439,7 @@ int main(int, char**) {
     RUN_TEST(test_truncated_json_never_returns_ok);
     RUN_TEST(test_empty_progress_array_keeps_the_provider);
     RUN_TEST(test_unknown_keys_are_ignored);
+    RUN_TEST(test_a_provider_with_no_plan_or_fetched_at);
     RUN_TEST(test_escapes_are_decoded);
     RUN_TEST(test_bad_escape_is_malformed);
     RUN_TEST(test_empty_string_at_the_arena_boundary);

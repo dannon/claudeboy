@@ -22,6 +22,11 @@ struct ChartPoint { const char* label; int64_t value; };
 struct Provider {
     const char* id;
     const char* display_name;
+    const char* plan;             // "Max 5x"; empty when the provider reports none
+    // When the agent last read this provider, not when the board last got a
+    // reply: a fast response carrying hour-old numbers is an hour old. Zero
+    // means nothing was ever fetched.
+    int64_t fetched_at_ms;
     const ProgressLine* progress; int progress_count;
     const TextLine* text;         int text_count;
     const ChartPoint* chart;      int chart_count;

@@ -33,8 +33,12 @@ const ChartPoint kClaudeChart[] = {
 };
 constexpr int kClaudeChartCount = sizeof kClaudeChart / sizeof kClaudeChart[0];
 
+// fetched_at is the reference instant itself, so anything rendering the
+// fixture at FIXTURE_REFERENCE_MS -- the host preview, the golden, the tests --
+// sees fresh data and no staleness chrome. A zero here would silently turn
+// every one of them into NO SIGNAL.
 const Provider kProviders[] = {
-    {"claude", "CLAUDE",
+    {"claude", "CLAUDE", "MAX 5X", REF,
      kClaudeProgress, 3,
      kClaudeText,     3,
      kClaudeChart,    kClaudeChartCount},
