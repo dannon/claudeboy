@@ -60,8 +60,9 @@ struct P {
         return false;
     }
 
-    // Byte 0 of the arena is a reserved NUL, so there is always a valid
-    // in-arena empty string to hand back and no field is ever null.
+    // Byte 0 of the arena is a reserved NUL -- parse_snapshot() refuses a null
+    // or zero-length arena, so there is always a valid in-arena empty string to
+    // hand back and no field is ever null.
     const char* empty() const { return a.text; }
 
     // Advances past a JSON string, reporting the raw span between the quotes.
@@ -71,7 +72,8 @@ struct P {
         ++p;
         b = p;
         while (p < end) {
-            if (*p == '\\') { p += 2; continue; }
+            // guard the pair so the cursor never forms end + 1
+            if (*p == '\\') { if (end - p < 2) break; p += 2; continue; }
             if (*p == '"') { e = p; ++p; return true; }
             ++p;
         }
@@ -81,7 +83,9 @@ struct P {
 
     // Copies a raw span into the arena, decoding escapes and NUL-terminating.
     const char* store(const char* b, const char* e) {
-        if (!a.text || a.text_bytes == 0) { truncated = true; return a.text; }
+        // An empty string is already sitting at byte 0, so hand that back
+        // rather than consume a byte the arena may not have.
+        if (b == e) return empty();
         const size_t start = str_used;
         bool ok = true;        // still room in the arena
         bool wellformed = true;
@@ -115,8 +119,8 @@ struct P {
                 default: ok = put(esc); break;   // covers \" \\ \/
             }
         }
-        if (!wellformed) { str_used = start; fail(); return a.text; }
-        if (!ok) { str_used = start; truncated = true; return a.text; }
+        if (!wellformed) { str_used = start; fail(); return empty(); }
+        if (!ok || str_used >= a.text_bytes) { str_used = start; truncated = true; return empty(); }
         a.text[str_used++] = '\0';
         return a.text + start;
     }
@@ -400,15 +404,16 @@ ParseResult parse_snapshot(const char* json, size_t len, ParseArena& arena,
     out.providers = nullptr;
     out.provider_count = 0;
     out.server_time_ms = 0;
+    // Truncated is a renderable result and the renderer dereferences every
+    // const char* it is handed, so a string arena that cannot even hold the
+    // reserved NUL is refused here rather than allowed to produce null or
+    // unterminated pointers downstream.
+    if (!arena.text || arena.text_bytes == 0) return ParseResult::Malformed;
     if (!json || len == 0) return ParseResult::Empty;
 
     P s(json, len, arena);
-    if (arena.text && arena.text_bytes > 0) {
-        arena.text[0] = '\0';   // the reserved in-arena empty string
-        s.str_used = 1;
-    } else {
-        s.truncated = true;
-    }
+    arena.text[0] = '\0';   // the reserved in-arena empty string
+    s.str_used = 1;
 
     if (!s.eat('{')) {
         s.fail();

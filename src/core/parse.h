@@ -19,8 +19,12 @@ struct ParseArena {
 
 // Ok         -- the whole payload landed in the arena.
 // Truncated  -- valid JSON, but the arena ran out; `out` holds what fit.
-// Malformed  -- the bytes are not a snapshot; `out` is zeroed.
+// Malformed  -- the bytes are not a snapshot, or `text` is null or zero-length;
+//               `out` is zeroed.
 // Empty      -- nothing to show (no body, or a body with no providers).
+//
+// Ok and Truncated are both renderable: every const char* in `out` points at a
+// NUL-terminated string inside `arena.text` and none of them is null.
 enum class ParseResult : uint8_t { Ok, Truncated, Malformed, Empty };
 
 ParseResult parse_snapshot(const char* json, size_t len, ParseArena& arena,

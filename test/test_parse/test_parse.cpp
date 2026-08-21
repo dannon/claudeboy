@@ -323,6 +323,66 @@ void test_bad_escape_is_malformed(void) {
     TEST_ASSERT_EQUAL_INT(0, s.provider_count);
 }
 
+void test_empty_string_at_the_arena_boundary(void) {
+    // Byte 0 is the reserved NUL and "abc" + NUL fills bytes 1..4, so the arena
+    // is exactly full when the empty displayName asks for its terminator.
+    const char* j = "{\"providers\":[{\"id\":\"abc\",\"displayName\":\"\"}]}";
+    cb::ParseArena a = full_arena();
+    a.text_bytes = 5;
+    memset(g_text + a.text_bytes, 0x5A, sizeof g_text - a.text_bytes);
+    cb::UsageSnapshot s{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Ok, cb::parse_snapshot(j, strlen(j), a, s));
+    TEST_ASSERT_EQUAL_INT(1, s.provider_count);
+    TEST_ASSERT_EQUAL_STRING("abc", s.providers[0].id);
+    TEST_ASSERT_EQUAL_STRING("", s.providers[0].display_name);
+    for (size_t i = a.text_bytes; i < sizeof g_text; i++) {
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(0x5A, (uint8_t)g_text[i], "parser wrote past the arena end");
+    }
+}
+
+void test_empty_strings_never_consume_the_arena(void) {
+    const char* j = "{\"providers\":[{\"id\":\"\",\"displayName\":\"\","
+                    "\"text\":[{\"label\":\"\",\"value\":\"\"}]}]}";
+    cb::ParseArena a = full_arena();
+    a.text_bytes = 1;   // room for the reserved NUL and nothing else
+    memset(g_text + a.text_bytes, 0x5A, sizeof g_text - a.text_bytes);
+    cb::UsageSnapshot s{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Ok, cb::parse_snapshot(j, strlen(j), a, s));
+    TEST_ASSERT_EQUAL_STRING("", s.providers[0].id);
+    TEST_ASSERT_EQUAL_STRING("", s.providers[0].text[0].value);
+    for (size_t i = a.text_bytes; i < sizeof g_text; i++) {
+        TEST_ASSERT_EQUAL_HEX8_MESSAGE(0x5A, (uint8_t)g_text[i], "parser wrote past the arena end");
+    }
+}
+
+void test_unusable_string_arena_is_malformed(void) {
+    // Truncated is documented as renderable, so a snapshot whose strings would
+    // all be null or unterminated has to be refused outright instead.
+    load("fixtures/api/snapshot-cyd.json");
+
+    cb::ParseArena a = full_arena();
+    a.text = nullptr; a.text_bytes = 0;
+    cb::UsageSnapshot s{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Malformed, cb::parse_snapshot(g_json, g_json_len, a, s));
+    TEST_ASSERT_EQUAL_INT(0, s.provider_count);
+    TEST_ASSERT_NULL(s.providers);
+
+    cb::ParseArena b = full_arena();
+    b.text_bytes = 0;
+    cb::UsageSnapshot s2{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Malformed, cb::parse_snapshot(g_json, g_json_len, b, s2));
+    TEST_ASSERT_EQUAL_INT(0, s2.provider_count);
+    TEST_ASSERT_NULL(s2.providers);
+}
+
+void test_trailing_backslash_is_malformed(void) {
+    // The escape skip must not step the cursor past end.
+    const char* j = "{\"providers\":[{\"id\":\"c\",\"displayName\":\"x\\";
+    cb::ParseArena a = full_arena();
+    cb::UsageSnapshot s{};
+    TEST_ASSERT_EQUAL(cb::ParseResult::Malformed, cb::parse_snapshot(j, strlen(j), a, s));
+}
+
 void test_deep_nesting_does_not_blow_the_stack(void) {
     char j[2048];
     size_t n = 0;
@@ -352,6 +412,10 @@ int main(int, char**) {
     RUN_TEST(test_unknown_keys_are_ignored);
     RUN_TEST(test_escapes_are_decoded);
     RUN_TEST(test_bad_escape_is_malformed);
+    RUN_TEST(test_empty_string_at_the_arena_boundary);
+    RUN_TEST(test_empty_strings_never_consume_the_arena);
+    RUN_TEST(test_unusable_string_arena_is_malformed);
+    RUN_TEST(test_trailing_backslash_is_malformed);
     RUN_TEST(test_deep_nesting_does_not_blow_the_stack);
     return UNITY_END();
 }
