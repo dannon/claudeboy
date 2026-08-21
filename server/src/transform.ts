@@ -29,6 +29,16 @@ function toInt(u: unknown): number | null {
   return typeof u === 'number' && Number.isFinite(u) ? Math.round(u) : null;
 }
 
+// validatePushBody rejects a whole body over one out-of-range integer, so the
+// bounds it enforces are restated here: a value we cannot fix is worth one
+// dropped line, never the whole push. These are Monkey C's signed 32-bit Number.
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
+function fitsInt32(n: number): boolean {
+  return n >= INT32_MIN && n <= INT32_MAX;
+}
+
 function progressFrom(line: RawLine): ProgressLine | null {
   const label = typeof line.label === 'string' ? line.label : null;
   const used = toInt(line.used);
@@ -37,7 +47,14 @@ function progressFrom(line: RawLine): ProgressLine | null {
   const periodMs = toInt(line.periodDurationMs);
   if (label === null || used === null || limit === null) return null;
   if (resetsAt === null || periodMs === null) return null;
-  return { label, used, limit, resetsAt, periodSec: Math.round(periodMs / 1000) };
+  const periodSec = Math.round(periodMs / 1000);
+  // A zero limit or period is a divide-by-zero downstream and negative use is
+  // nonsense, so the validator refuses them; catch them here while it still
+  // costs one line.
+  if (used < 0 || limit < 1 || periodSec < 1) return null;
+  if (!fitsInt32(used) || !fitsInt32(limit)) return null;
+  if (!fitsInt32(resetsAt) || !fitsInt32(periodSec)) return null;
+  return { label, used, limit, resetsAt, periodSec };
 }
 
 function textFrom(line: RawLine): TextLine | null {
@@ -52,7 +69,7 @@ function chartFrom(line: RawLine): ChartPoint[] {
     if (!isRecord(pt)) continue;
     const label = typeof pt['label'] === 'string' ? pt['label'] : null;
     const value = toInt(pt['value']);
-    if (label === null || value === null) continue;
+    if (label === null || value === null || !fitsInt32(value)) continue;
     out.push({ label, value });
   }
   return out;
@@ -64,6 +81,7 @@ function providerFrom(raw: unknown): Provider | null {
   const displayName = typeof raw['displayName'] === 'string' ? raw['displayName'] : null;
   const fetchedAt = toEpochSec(raw['fetchedAt']);
   if (id === null || displayName === null || fetchedAt === null) return null;
+  if (!fitsInt32(fetchedAt)) return null;
 
   const plan = typeof raw['plan'] === 'string' ? raw['plan'] : '';
   const lines = Array.isArray(raw['lines']) ? (raw['lines'] as RawLine[]) : [];
@@ -86,7 +104,8 @@ function providerFrom(raw: unknown): Provider | null {
         break;
       }
       case 'barChart': {
-        // Last one wins; OpenUsage has only ever sent one per provider.
+        // Last chart with usable points wins; OpenUsage has only ever sent one
+        // per provider, and an all-unreadable one should not blank out a good one.
         const c = chartFrom(line);
         if (c.length) chart = c;
         break;

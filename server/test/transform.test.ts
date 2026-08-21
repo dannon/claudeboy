@@ -7,6 +7,18 @@ const raw = JSON.parse(
   readFileSync(new URL('../fixtures/openusage-20260821.json', import.meta.url), 'utf8'),
 );
 
+// Counts are derived from the fixture rather than pinned to this capture's
+// numbers, so a re-capture moves them instead of breaking a test about
+// something else entirely.
+function linesOf(provider: unknown): Array<Record<string, unknown>> {
+  return (provider as { lines: Array<Record<string, unknown>> }).lines;
+}
+
+function chartPointsOf(provider: unknown): Array<Record<string, unknown>> {
+  const bar = linesOf(provider).find((l) => l['type'] === 'barChart')!;
+  return bar['points'] as Array<Record<string, unknown>>;
+}
+
 describe('transformOpenUsage', () => {
   it('produces a body that passes its own validator', () => {
     const r = validatePushBody(transformOpenUsage(raw));
@@ -53,25 +65,65 @@ describe('transformOpenUsage', () => {
   it('keeps text and chart for providers that have them', () => {
     const claude = transformOpenUsage(raw).providers[0]!;
     expect(claude.text!.length).toBeGreaterThan(0);
-    expect(claude.chart!.length).toBe(31);
+    expect(claude.chart!.length).toBe(chartPointsOf(raw[0]).length);
     expect(claude.chart![0]!).toHaveProperty('label');
     expect(typeof claude.chart![0]!.value).toBe('number');
   });
 
   it('drops line types it does not understand rather than failing', () => {
+    const baseline = transformOpenUsage(raw).providers[0]!;
     const doctored = structuredClone(raw);
     doctored[0].lines.push({ type: 'sparkline', label: 'New', data: [1, 2, 3] });
     const out = transformOpenUsage(doctored);
     expect(validatePushBody(out).ok).toBe(true);
-    expect(out.providers[0]!.progress.map((l) => l.label)).not.toContain('New');
+    // An unknown type has to leave every bucket alone, not just progress: it must
+    // not be mis-routed into text or chart, and it must not take a real line with
+    // it on the way out.
+    const after = out.providers[0]!;
+    expect(after.progress).toEqual(baseline.progress);
+    expect(after.text).toEqual(baseline.text);
+    expect(after.chart).toEqual(baseline.chart);
+    expect(after.progress.map((l) => l.label)).not.toContain('New');
+    expect(after.text!.map((l) => l.label)).not.toContain('New');
+    expect(after.chart!.map((c) => c.label)).not.toContain('New');
   });
 
   it('skips a progress line with an unparseable resetsAt rather than emitting NaN', () => {
+    const before = transformOpenUsage(raw).providers[0]!.progress.length;
     const doctored = structuredClone(raw);
+    // The count below only says anything if the line being broken is a progress one.
+    expect(linesOf(doctored[0])[0]!['type']).toBe('progress');
     doctored[0].lines[0].resetsAt = 'not a date';
     const out = transformOpenUsage(doctored);
     expect(validatePushBody(out).ok).toBe(true);
-    expect(out.providers[0]!.progress).toHaveLength(2);
+    expect(out.providers[0]!.progress).toHaveLength(before - 1);
+  });
+
+  it('drops a progress line the validator would refuse, not the whole push', () => {
+    const before = transformOpenUsage(raw).providers[0]!.progress.length;
+    const doctored = structuredClone(raw);
+    doctored[0].lines.push({
+      type: 'progress',
+      label: 'Degenerate',
+      used: -5,
+      limit: 0,
+      resetsAt: doctored[0].lines[0].resetsAt,
+      periodDurationMs: 400,
+    });
+    const out = transformOpenUsage(doctored);
+    const r = validatePushBody(out);
+    expect(r.ok, r.ok ? '' : r.error).toBe(true);
+    expect(out.providers[0]!.progress).toHaveLength(before);
+  });
+
+  it('drops a chart point too big for a 32-bit Number, not the whole push', () => {
+    const before = transformOpenUsage(raw).providers[0]!.chart!.length;
+    const doctored = structuredClone(raw);
+    chartPointsOf(doctored[0]).push({ value: 3e9, valueLabel: '3B', label: 'Overflow' });
+    const out = transformOpenUsage(doctored);
+    const r = validatePushBody(out);
+    expect(r.ok, r.ok ? '' : r.error).toBe(true);
+    expect(out.providers[0]!.chart).toHaveLength(before);
   });
 
   it('carries no clock of its own, so it is byte-stable across calls', () => {
