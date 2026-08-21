@@ -2,6 +2,7 @@
 #include <math.h>
 #include "core/types.h"
 #include "core/pace.h"
+#include "core/fixture.h"
 
 static cb::ProgressLine line(int32_t used, int64_t resets_in_ms, int64_t period_ms) {
     return cb::ProgressLine{"Test", used, 100, 1000000 + resets_in_ms, period_ms};
@@ -114,6 +115,24 @@ void test_zero_limit_is_invalid(void) {
     TEST_ASSERT_FALSE(p.valid);
 }
 
+void test_fixture_reproduces_captured_states(void) {
+    const cb::UsageSnapshot& s = cb::fixture_snapshot();
+    TEST_ASSERT_EQUAL_INT(1, s.provider_count);
+    const cb::Provider& p = s.providers[0];
+    TEST_ASSERT_EQUAL_INT(3, p.progress_count);
+
+    cb::Pace session = cb::compute_pace(p.progress[0], cb::FIXTURE_REFERENCE_MS);
+    cb::Pace weekly  = cb::compute_pace(p.progress[1], cb::FIXTURE_REFERENCE_MS);
+    cb::Pace fable   = cb::compute_pace(p.progress[2], cb::FIXTURE_REFERENCE_MS);
+
+    TEST_ASSERT_EQUAL(cb::PaceState::Surplus, session.state);
+    TEST_ASSERT_EQUAL(cb::PaceState::OnPace,  weekly.state);
+    TEST_ASSERT_EQUAL(cb::PaceState::Surplus, fable.state);
+
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, 1.01f, weekly.ratio);
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.42f, weekly.remaining_frac);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_on_pace_midwindow);
@@ -130,5 +149,6 @@ int main(int, char**) {
     RUN_TEST(test_just_above_elapsed_floor_gives_a_verdict);
     RUN_TEST(test_zero_period_is_invalid);
     RUN_TEST(test_zero_limit_is_invalid);
+    RUN_TEST(test_fixture_reproduces_captured_states);
     return UNITY_END();
 }
