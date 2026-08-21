@@ -102,4 +102,37 @@ void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_by
     }
 }
 
+void apply_scanlines(Canvas& c, const EffectParams& p) {
+    if (p.scanline_depth == 0) return;
+    const uint32_t keep = 255u - p.scanline_depth;
+    uint8_t* d = c.data();
+    const int w = c.width(), h = c.height();
+    for (int y = 1; y < h; y += 2) {
+        uint8_t* row = d + static_cast<size_t>(y) * w;
+        for (int x = 0; x < w; x++)
+            row[x] = static_cast<uint8_t>((static_cast<uint32_t>(row[x]) * keep) / 255u);
+    }
+}
+
+void apply_vignette(Canvas& c, const EffectParams& p) {
+    if (p.vignette_strength == 0) return;
+    const int w = c.width(), h = c.height();
+    const float cx = (w - 1) * 0.5f, cy = (h - 1) * 0.5f;
+    const float inv = 1.0f / (cx * cx + cy * cy);
+    uint8_t* d = c.data();
+    for (int y = 0; y < h; y++) {
+        const float dy = y - cy;
+        for (int x = 0; x < w; x++) {
+            const float dx = x - cx;
+            float t = (dx * dx + dy * dy) * inv;      // 0 at centre, 1 at corners
+            // Flat through the middle, falling off toward the edges.
+            t = t * t;
+            const uint32_t cut = static_cast<uint32_t>(t * p.vignette_strength);
+            const uint32_t keep = cut >= 255u ? 0u : 255u - cut;
+            uint8_t& v = d[static_cast<size_t>(y) * w + x];
+            v = static_cast<uint8_t>((static_cast<uint32_t>(v) * keep) / 255u);
+        }
+    }
+}
+
 }  // namespace cb

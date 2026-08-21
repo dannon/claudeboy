@@ -152,6 +152,47 @@ void test_bloom_with_undersized_ring_is_skipped(void) {
     TEST_ASSERT_EQUAL_UINT8(0, c.at(17, 8));   // refused rather than corrupted
 }
 
+void test_scanlines_darken_odd_rows_only(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    cb::apply_scanlines(c, p);
+    TEST_ASSERT_EQUAL_UINT8(200, c.at(5, 0));
+    TEST_ASSERT_TRUE(c.at(5, 1) < 200);
+    TEST_ASSERT_EQUAL_UINT8(200, c.at(5, 2));
+}
+
+void test_scanline_depth_zero_is_a_noop(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.scanline_depth = 0;
+    cb::apply_scanlines(c, p);
+    TEST_ASSERT_EQUAL_UINT8(200, c.at(5, 1));
+}
+
+void test_scanlines_stay_subtle_at_defaults(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);
+    cb::apply_scanlines(c, cb::EffectParams::defaults());
+    TEST_ASSERT_TRUE(c.at(5, 1) > 120);   // dimmed, not halved
+}
+
+void test_vignette_darkens_corners_more_than_centre(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);
+    cb::apply_vignette(c, cb::EffectParams::defaults());
+    TEST_ASSERT_TRUE(c.at(0, 0) < c.at(16, 8));
+    TEST_ASSERT_TRUE(c.at(31, 15) < c.at(16, 8));
+}
+
+void test_vignette_leaves_centre_alone(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);
+    cb::apply_vignette(c, cb::EffectParams::defaults());
+    TEST_ASSERT_UINT8_WITHIN(6, 200, c.at(16, 8));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_zero_intensity_is_black);
@@ -172,5 +213,10 @@ int main(int, char**) {
     RUN_TEST(test_bloom_reaches_the_top_row);
     RUN_TEST(test_bloom_reaches_the_bottom_row);
     RUN_TEST(test_bloom_with_undersized_ring_is_skipped);
+    RUN_TEST(test_scanlines_darken_odd_rows_only);
+    RUN_TEST(test_scanline_depth_zero_is_a_noop);
+    RUN_TEST(test_scanlines_stay_subtle_at_defaults);
+    RUN_TEST(test_vignette_darkens_corners_more_than_centre);
+    RUN_TEST(test_vignette_leaves_centre_alone);
     return UNITY_END();
 }

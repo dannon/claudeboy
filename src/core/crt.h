@@ -31,4 +31,7 @@ size_t bloom_ring_bytes(int radius, int width);
 // If ring_bytes is too small the call does nothing.
 void apply_bloom(Canvas& c, const EffectParams& p, uint8_t* ring, size_t ring_bytes);
 
+void apply_scanlines(Canvas& c, const EffectParams& p);
+void apply_vignette(Canvas& c, const EffectParams& p);
+
 }  // namespace cb
