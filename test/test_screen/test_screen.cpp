@@ -181,6 +181,33 @@ void test_verdict_fits_a_narrow_cell(void) {
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + w, cb::CELL_Y, 20, cb::CELL_H));
 }
 
+void test_invalid_pace_draws_no_gauge(void) {
+    const int w = 100, bar_x = cb::MARGIN + 3, bar_w = w - 6;
+    // limit 0: nothing to be a percentage of.
+    cb::ProgressLine broken{"WEEKLY", 12, 0, cb::FIXTURE_REFERENCE_MS + 3600000, 7200000};
+    cb::Pace p = cb::compute_pace(broken, cb::FIXTURE_REFERENCE_MS);
+    TEST_ASSERT_FALSE(p.valid);
+
+    cb::Canvas c = mks();
+    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, w, broken, p);
+    // An empty drain bar would read as a fully exhausted window, so there is
+    // no bar, no pace tick and no verdict.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 31, bar_w, 4));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 36, bar_w, 8));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 48, bar_w, cb::FONT_H));
+    // The cell still says which line it is, and shows a placeholder reading.
+    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::CELL_Y + 3, bar_w, cb::FONT_H) > 10);
+    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::CELL_Y + 13, bar_w, 2 * cb::FONT_H) > 4);
+
+    // Same for a line with no period at all.
+    cb::ProgressLine no_period{"WEEKLY", 12, 100, cb::FIXTURE_REFERENCE_MS + 3600000, 0};
+    cb::Pace q = cb::compute_pace(no_period, cb::FIXTURE_REFERENCE_MS);
+    TEST_ASSERT_FALSE(q.valid);
+    cb::Canvas d = mks();
+    cb::draw_gauge_cell(d, cb::MARGIN, cb::CELL_Y, w, no_period, q);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(d, bar_x, cb::CELL_Y + 36, bar_w, 8));
+}
+
 void test_unknown_state_draws_no_tick(void) {
     cb::Canvas c = mks();
     cb::ProgressLine fresh{"NEW", 1, 100,
@@ -215,6 +242,7 @@ int main(int, char**) {
     RUN_TEST(test_render_ambient_fills_all_bands);
     RUN_TEST(test_render_ambient_with_bad_index_is_safe);
     RUN_TEST(test_verdict_fits_a_narrow_cell);
+    RUN_TEST(test_invalid_pace_draws_no_gauge);
     RUN_TEST(test_unknown_state_draws_no_tick);
     return UNITY_END();
 }

@@ -82,6 +82,15 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
 
     draw_text(c, x + 3, y + 3, line.label, I_DIM, 1);
 
+    // No period or no limit means there was never a reading to take. Drawing
+    // "0%" over an empty bar would be indistinguishable from a window that is
+    // genuinely spent, so say nothing instead: the label and a dim placeholder,
+    // no tick, no bar, no verdict.
+    if (!p.valid) {
+        draw_text(c, x + 3, y + 13, "--", I_DIM, 2);
+        return;
+    }
+
     char pct[8];
     snprintf(pct, sizeof pct, "%d%%", static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
     draw_text(c, x + 3, y + 13, pct, I_NORMAL, 2);
