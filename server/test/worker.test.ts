@@ -1,0 +1,147 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import worker, { KV_KEY, type Env } from '../src/worker.ts';
+
+const body = JSON.parse(
+  readFileSync(new URL('../fixtures/snapshot-20260821.json', import.meta.url), 'utf8'),
+);
+
+class FakeKV {
+  store = new Map<string, string>();
+  async get(key: string) { return this.store.get(key) ?? null; }
+  async put(key: string, value: string) { this.store.set(key, value); }
+}
+
+let kv: FakeKV;
+let env: Env;
+
+beforeEach(() => {
+  kv = new FakeKV();
+  env = {
+    SNAPSHOTS: kv as unknown as KVNamespace,
+    CLAUDEBOY_PUSH_TOKEN: 'push-secret',
+    CLAUDEBOY_READ_TOKEN: 'read-secret',
+  };
+});
+
+const ctx = {} as ExecutionContext;
+
+function push(token: string, payload: unknown) {
+  return worker.fetch(
+    new Request('https://x/v1/push', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+    env,
+    ctx,
+  );
+}
+
+function get(token: string | null, query = '') {
+  return worker.fetch(
+    new Request(`https://x/v1/snapshot${query}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    }),
+    env,
+    ctx,
+  );
+}
+
+describe('POST /v1/push', () => {
+  it('accepts a valid body with the push token and stores it', async () => {
+    const r = await push('push-secret', body);
+    expect(r.status).toBe(204);
+    expect(JSON.parse(kv.store.get(KV_KEY)!)).toEqual(body);
+  });
+
+  it('rejects a missing, malformed or wrong token with 401', async () => {
+    expect((await push('read-secret', body)).status).toBe(401);
+    expect((await push('nonsense', body)).status).toBe(401);
+    const bare = await worker.fetch(
+      new Request('https://x/v1/push', { method: 'POST', body: '{}' }), env, ctx);
+    expect(bare.status).toBe(401);
+  });
+
+  it('rejects an invalid body with 400 and does not touch KV', async () => {
+    const r = await push('push-secret', { providers: [{ id: 'x' }] });
+    expect(r.status).toBe(400);
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('rejects unparseable JSON with 400', async () => {
+    const r = await worker.fetch(
+      new Request('https://x/v1/push', {
+        method: 'POST',
+        headers: { authorization: 'Bearer push-secret' },
+        body: 'not json',
+      }), env, ctx);
+    expect(r.status).toBe(400);
+  });
+
+  it('stores only providers, never a serverTime', async () => {
+    await push('push-secret', { ...body, serverTime: 1 });
+    expect(JSON.parse(kv.store.get(KV_KEY)!)).not.toHaveProperty('serverTime');
+  });
+});
+
+describe('GET /v1/snapshot', () => {
+  it('rejects a missing or wrong token with 401', async () => {
+    await push('push-secret', body);
+    expect((await get(null)).status).toBe(401);
+    expect((await get('push-secret')).status).toBe(401);
+  });
+
+  it('returns 503 when nothing has been pushed yet', async () => {
+    const r = await get('read-secret');
+    expect(r.status).toBe(503);
+    expect(await r.json()).toEqual({ error: 'no snapshot' });
+  });
+
+  it('stamps serverTime from the Worker clock, not from the push', async () => {
+    await push('push-secret', body);
+    const before = Math.floor(Date.now() / 1000);
+    const snap = (await (await get('read-secret')).json()) as any;
+    expect(snap.serverTime).toBeGreaterThanOrEqual(before);
+    expect(snap.serverTime).toBeLessThan(before + 5);
+    expect(snap.serverTime).toBeLessThan(1e11);
+  });
+
+  it('shapes for the watch when asked', async () => {
+    await push('push-secret', body);
+    const snap = (await (await get('read-secret', '?client=watch')).json()) as any;
+    for (const p of snap.providers) expect('chart' in p).toBe(false);
+  });
+
+  it('returns the full document for client=cyd', async () => {
+    await push('push-secret', body);
+    const snap = (await (await get('read-secret', '?client=cyd')).json()) as any;
+    expect(snap.providers[0].chart.length).toBe(31);
+  });
+
+  it('sets no-store so a stale snapshot is never cached anywhere', async () => {
+    await push('push-secret', body);
+    const r = await get('read-secret');
+    expect(r.headers.get('cache-control')).toContain('no-store');
+    expect(r.headers.get('content-type')).toContain('application/json');
+  });
+});
+
+describe('routing', () => {
+  it('404s an unknown path', async () => {
+    const r = await worker.fetch(new Request('https://x/'), env, ctx);
+    expect(r.status).toBe(404);
+  });
+
+  it('405s a GET on push and a POST on snapshot', async () => {
+    const g = await worker.fetch(
+      new Request('https://x/v1/push', { headers: { authorization: 'Bearer push-secret' } }),
+      env, ctx);
+    expect(g.status).toBe(405);
+    const p = await worker.fetch(
+      new Request('https://x/v1/snapshot', {
+        method: 'POST', headers: { authorization: 'Bearer read-secret' },
+      }), env, ctx);
+    expect(p.status).toBe(405);
+  });
+});
