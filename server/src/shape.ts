@@ -12,7 +12,11 @@ import type { Provider, Snapshot } from './schema.ts';
  * before someone teaches this function about it.
  */
 export function shapeForClient(snapshot: Snapshot, client: string | null): Snapshot {
-  if (client !== 'watch') return snapshot;
+  // Case-folded on purpose. The caller is a string literal in Monkey C source,
+  // and a stray ?client=WATCH would fall through to the unknown-client rule and
+  // hand the watch the whole 3.5KB document -- four seconds of BLE and a real
+  // -402 risk, with nothing in the response hinting that capitalisation did it.
+  if (client?.toLowerCase() !== 'watch') return snapshot;
   return {
     serverTime: snapshot.serverTime,
     providers: snapshot.providers.map((p): Provider => ({
