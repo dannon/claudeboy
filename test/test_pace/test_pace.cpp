@@ -23,16 +23,17 @@ void test_surplus(void) {
     cb::Pace p = cb::compute_pace(line(20, 51LL*HOUR/60, 5LL*HOUR), NOW);
     TEST_ASSERT_EQUAL(cb::PaceState::Surplus, p.state);
     TEST_ASSERT_TRUE(p.ratio < 0.90f);
-    TEST_ASSERT_EQUAL_INT64(0, p.burnout_early_ms);
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, p.ratio, p.projected_frac);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.80f, p.remaining_frac);
 }
 
 void test_burnout_reports_how_early(void) {
     // 80% used with only 50% elapsed -> ratio 1.6, exhausts well before reset
+    // ETA: elapsed * (1-used_frac)/used_frac = 84h * 0.25 = 21h, so 84h - 21h = 63h before reset
     cb::Pace p = cb::compute_pace(line(80, 84LL*HOUR, 168LL*HOUR), NOW);
     TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
     TEST_ASSERT_TRUE(p.ratio > 1.02f);
-    TEST_ASSERT_TRUE(p.burnout_early_ms > 0);
-    TEST_ASSERT_TRUE(p.burnout_early_ms < 84LL*HOUR);
+    TEST_ASSERT_FLOAT_WITHIN(5LL*60*1000, 63LL*HOUR, p.burnout_early_ms);
 }
 
 void test_window_just_reset_does_not_divide_by_zero(void) {
@@ -80,6 +81,27 @@ void test_verdict_appears_once_past_the_floor(void) {
     TEST_ASSERT_EQUAL(cb::PaceState::Surplus, p.state);
 }
 
+void test_reset_further_out_than_one_period_clamps(void) {
+    // reset_in 300 hours in a 168-hour window -- nonsense the API could emit
+    cb::Pace p = cb::compute_pace(line(40, 300LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_EQUAL_INT64(168LL*HOUR, p.reset_in_ms);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, p.elapsed_frac);
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, p.state);
+}
+
+void test_just_below_elapsed_floor_gives_no_verdict(void) {
+    // 4% elapsed, just below the MIN_ELAPSED_FRAC floor
+    cb::Pace p = cb::compute_pace(line(3, 96LL*HOUR, 100LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, p.state);
+}
+
+void test_just_above_elapsed_floor_gives_a_verdict(void) {
+    // 6% elapsed, just above the MIN_ELAPSED_FRAC floor, used_frac 0.03, ratio 0.5
+    cb::Pace p = cb::compute_pace(line(3, 94LL*HOUR, 100LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Surplus, p.state);
+}
+
 void test_zero_period_is_invalid(void) {
     cb::Pace p = cb::compute_pace(line(50, HOUR, 0), NOW);
     TEST_ASSERT_FALSE(p.valid);
@@ -103,6 +125,9 @@ int main(int, char**) {
     RUN_TEST(test_fresh_window_does_not_cry_burnout);
     RUN_TEST(test_exhausted_reports_even_when_early);
     RUN_TEST(test_verdict_appears_once_past_the_floor);
+    RUN_TEST(test_reset_further_out_than_one_period_clamps);
+    RUN_TEST(test_just_below_elapsed_floor_gives_no_verdict);
+    RUN_TEST(test_just_above_elapsed_floor_gives_a_verdict);
     RUN_TEST(test_zero_period_is_invalid);
     RUN_TEST(test_zero_limit_is_invalid);
     return UNITY_END();
