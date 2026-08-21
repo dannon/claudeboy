@@ -58,6 +58,11 @@ std::vector<uint8_t> deflate_stored(const std::vector<uint8_t>& raw) {
 }  // namespace
 
 bool write_png_rgb(const char* path, const uint8_t* rgb, int w, int h) {
+    // Canvas legitimately degrades to 0x0 on bad dimensions, and an empty
+    // payload makes deflate_stored emit no BFINAL block at all -- a stream
+    // no decoder will accept. Refuse rather than write a broken file.
+    if (!path || !rgb || w <= 0 || h <= 0) return false;
+
     std::vector<uint8_t> raw;
     raw.reserve(size_t(h) * (1 + size_t(w) * 3));
     for (int y = 0; y < h; y++) {

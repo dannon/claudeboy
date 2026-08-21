@@ -22,6 +22,17 @@ void test_green_is_monotonic(void) {
     }
 }
 
+// Red and blue are monotonic by construction -- a squared falloff scaled
+// linearly -- but only green was ever pinned, so a change to the curve could
+// dip or invert either of them and every test would still pass.
+void test_red_and_blue_are_monotonic(void) {
+    for (int i = 1; i < 256; i++) {
+        const cb::Rgb c = cb::palette_rgb(i), prev = cb::palette_rgb(i - 1);
+        TEST_ASSERT_TRUE_MESSAGE(c.r >= prev.r, "red channel dips");
+        TEST_ASSERT_TRUE_MESSAGE(c.b >= prev.b, "blue channel dips");
+    }
+}
+
 void test_midtones_stay_green_dominant(void) {
     cb::Rgb c = cb::palette_rgb(128);
     TEST_ASSERT_TRUE(c.g > c.r * 2);
@@ -270,6 +281,7 @@ int main(int, char**) {
     RUN_TEST(test_zero_intensity_is_black);
     RUN_TEST(test_full_intensity_is_phosphor_green);
     RUN_TEST(test_green_is_monotonic);
+    RUN_TEST(test_red_and_blue_are_monotonic);
     RUN_TEST(test_midtones_stay_green_dominant);
     RUN_TEST(test_rgb565_packs_black_and_green);
     RUN_TEST(test_defaults_are_sane);

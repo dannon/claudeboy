@@ -81,6 +81,10 @@ void test_cell_width_fits_three_and_four(void) {
         TEST_ASSERT_TRUE(n * w + (n - 1) * cb::CELL_GAP <= usable);
     }
     TEST_ASSERT_TRUE(cb::cell_width(4) < cb::cell_width(3));
+    // `usable` goes negative long before count does; the width must not.
+    TEST_ASSERT_TRUE(cb::cell_width(1000) >= 1);
+    TEST_ASSERT_TRUE(cb::cell_width(0) >= 1);
+    TEST_ASSERT_TRUE(cb::cell_width(-5) >= 1);
 }
 
 void test_cells_draw_inside_their_band(void) {

@@ -27,7 +27,7 @@ void format_clock(int64_t now_ms, char* out, size_t n) {
 
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock) {
     int x = MARGIN;
-    for (int i = 0; i < snap.provider_count; i++) {
+    for (int i = 0; snap.providers && i < snap.provider_count; i++) {
         const char* name = snap.providers[i].display_name;
         const int w = text_width(name, 1);
         // Inverse video would need a hole punched in a filled bar, which this
@@ -73,7 +73,8 @@ uint8_t verdict_intensity(PaceState s) {
 int cell_width(int count) {
     if (count < 1) count = 1;
     const int usable = SCREEN_W - 2 * MARGIN - (count - 1) * CELL_GAP;
-    return usable / count;
+    const int w = usable / count;
+    return w < 1 ? 1 : w;   // usable goes negative long before count does
 }
 
 void draw_gauge_cell(Canvas& c, int x, int y, int w,
@@ -130,7 +131,7 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
 
 void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms) {
     const int n = prov.progress_count;
-    if (n <= 0) return;
+    if (n <= 0 || !prov.progress) return;
     const int w = cell_width(n);
     for (int i = 0; i < n; i++) {
         const int x = MARGIN + i * (w + CELL_GAP);
@@ -174,13 +175,13 @@ void draw_chart(Canvas& c, const Provider& prov) {
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
                     int64_t now_ms, const char* clock) {
     draw_tabs(c, snap, provider_index, clock);
-    if (provider_index < 0 || provider_index >= snap.provider_count) return;
+    if (!snap.providers || provider_index < 0 || provider_index >= snap.provider_count) return;
 
     const Provider& prov = snap.providers[provider_index];
     draw_cells(c, prov, now_ms);
     draw_chart(c, prov);
 
-    const char* left = prov.text_count > 0 ? prov.text[0].value : "";
+    const char* left = (prov.text && prov.text_count > 0) ? prov.text[0].value : "";
     draw_footer(c, left, "WORKING");
 }
 
