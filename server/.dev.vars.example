@@ -1,0 +1,4 @@
+# Copy to server/.dev.vars (git-ignored) for `wrangler dev`.
+# Generate real values with: openssl rand -hex 32
+CLAUDEBOY_PUSH_TOKEN=dev-push-token
+CLAUDEBOY_READ_TOKEN=dev-read-token
