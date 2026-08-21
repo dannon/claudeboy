@@ -1,13 +1,109 @@
 #include <unity.h>
+#include <math.h>
 #include "core/types.h"
+#include "core/pace.h"
 
-void test_screen_dimensions(void) {
-    TEST_ASSERT_EQUAL_INT(320, cb::SCREEN_W);
-    TEST_ASSERT_EQUAL_INT(240, cb::SCREEN_H);
+static cb::ProgressLine line(int32_t used, int64_t resets_in_ms, int64_t period_ms) {
+    return cb::ProgressLine{"Test", used, 100, 1000000 + resets_in_ms, period_ms};
+}
+static const int64_t NOW = 1000000;
+static const int64_t HOUR = 3600LL * 1000;
+
+void test_on_pace_midwindow(void) {
+    // 58% used, 57.6% elapsed -> ratio ~1.007 -> OnPace
+    cb::Pace p = cb::compute_pace(line(58, 71LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_EQUAL(cb::PaceState::OnPace, p.state);
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.42f, p.remaining_frac);
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 1.007f, p.ratio);
+}
+
+void test_surplus(void) {
+    // 20% used, 83% elapsed -> ratio 0.24
+    cb::Pace p = cb::compute_pace(line(20, 51LL*HOUR/60, 5LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Surplus, p.state);
+    TEST_ASSERT_TRUE(p.ratio < 0.90f);
+    TEST_ASSERT_EQUAL_INT64(0, p.burnout_early_ms);
+}
+
+void test_burnout_reports_how_early(void) {
+    // 80% used with only 50% elapsed -> ratio 1.6, exhausts well before reset
+    cb::Pace p = cb::compute_pace(line(80, 84LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
+    TEST_ASSERT_TRUE(p.ratio > 1.02f);
+    TEST_ASSERT_TRUE(p.burnout_early_ms > 0);
+    TEST_ASSERT_TRUE(p.burnout_early_ms < 84LL*HOUR);
+}
+
+void test_window_just_reset_does_not_divide_by_zero(void) {
+    // elapsed == 0
+    cb::Pace p = cb::compute_pace(line(0, 168LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, p.state);
+    TEST_ASSERT_FALSE(isnan(p.ratio));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, p.remaining_frac);
+}
+
+void test_reset_in_the_past_clamps(void) {
+    cb::Pace p = cb::compute_pace(line(40, -5LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_EQUAL_INT64(0, p.reset_in_ms);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, p.elapsed_frac);
+}
+
+void test_exhausted_window(void) {
+    cb::Pace p = cb::compute_pace(line(100, 10LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, p.remaining_frac);
+    TEST_ASSERT_EQUAL_INT64(10LL*HOUR, p.burnout_early_ms);
+}
+
+void test_fresh_window_does_not_cry_burnout(void) {
+    // Antigravity's real shape one minute into a 5h window: a sliver of usage
+    // against a sliver of elapsed time computes to a huge ratio.
+    cb::Pace p = cb::compute_pace(line(1, 299LL*HOUR/60, 5LL*HOUR), NOW);
+    TEST_ASSERT_TRUE(p.valid);
+    TEST_ASSERT_TRUE(p.ratio > 1.02f);                    // the raw ratio is alarming
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, p.state);   // but we refuse to call it
+    TEST_ASSERT_EQUAL_INT64(0, p.burnout_early_ms);
+}
+
+void test_exhausted_reports_even_when_early(void) {
+    // Burning the whole window in its first minutes is real news, not noise.
+    cb::Pace p = cb::compute_pace(line(100, 299LL*HOUR/60, 5LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
+}
+
+void test_verdict_appears_once_past_the_floor(void) {
+    // 10% elapsed, comfortably past MIN_ELAPSED_FRAC
+    cb::Pace p = cb::compute_pace(line(2, 151LL*HOUR, 168LL*HOUR), NOW);
+    TEST_ASSERT_EQUAL(cb::PaceState::Surplus, p.state);
+}
+
+void test_zero_period_is_invalid(void) {
+    cb::Pace p = cb::compute_pace(line(50, HOUR, 0), NOW);
+    TEST_ASSERT_FALSE(p.valid);
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, p.state);
+}
+
+void test_zero_limit_is_invalid(void) {
+    cb::ProgressLine l{"Test", 5, 0, NOW + HOUR, 168LL*HOUR};
+    cb::Pace p = cb::compute_pace(l, NOW);
+    TEST_ASSERT_FALSE(p.valid);
 }
 
 int main(int, char**) {
     UNITY_BEGIN();
-    RUN_TEST(test_screen_dimensions);
+    RUN_TEST(test_on_pace_midwindow);
+    RUN_TEST(test_surplus);
+    RUN_TEST(test_burnout_reports_how_early);
+    RUN_TEST(test_window_just_reset_does_not_divide_by_zero);
+    RUN_TEST(test_reset_in_the_past_clamps);
+    RUN_TEST(test_exhausted_window);
+    RUN_TEST(test_fresh_window_does_not_cry_burnout);
+    RUN_TEST(test_exhausted_reports_even_when_early);
+    RUN_TEST(test_verdict_appears_once_past_the_floor);
+    RUN_TEST(test_zero_period_is_invalid);
+    RUN_TEST(test_zero_limit_is_invalid);
     return UNITY_END();
 }
