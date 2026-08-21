@@ -54,6 +54,13 @@ function methodNotAllowed(allow: string): Response {
   return new Response(null, { status: 405, headers: { allow } });
 }
 
+// KV holds whatever was last written to it, and a hand-edited or half-written
+// value is valid JSON of the wrong shape rather than a parse error. Nothing below
+// checks providers again, so this is the last place it can be caught.
+function hasProviders(u: unknown): u is PushBody {
+  return typeof u === 'object' && u !== null && Array.isArray((u as PushBody).providers);
+}
+
 function noSnapshot(): Response {
   return new Response(JSON.stringify({ error: 'no snapshot' }), {
     status: 503, headers: JSON_HEADERS,
@@ -93,18 +100,21 @@ async function handleSnapshot(request: Request, env: Env): Promise<Response> {
   const stored = await env.SNAPSHOTS.get(KV_KEY);
   if (stored === null) return noSnapshot();
 
-  let body: PushBody;
+  let parsed: unknown;
   try {
-    body = JSON.parse(stored) as PushBody;
+    parsed = JSON.parse(stored);
   } catch {
     // A corrupt value is worth no more to a client than a missing one, and both
     // clients already render the 503. A bare 500 is a state neither knows.
     return noSnapshot();
   }
+  // Same reasoning one step later: 'null', '{}', '[]' and {"providers":"x"} all
+  // parse cleanly and then throw further down, which would surface as a 500.
+  if (!hasProviders(parsed)) return noSnapshot();
 
   const snapshot: Snapshot = {
     serverTime: Math.floor(Date.now() / 1000),
-    providers: body.providers,
+    providers: parsed.providers,
   };
   const client = new URL(request.url).searchParams.get('client');
   return new Response(JSON.stringify(shapeForClient(snapshot, client)), {

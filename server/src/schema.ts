@@ -52,6 +52,12 @@ export type ValidationResult =
 // year 5138; 1e11 milliseconds is 1973. Nothing legitimate lands between.
 const MILLIS_THRESHOLD = 1e11;
 
+// No usage window runs longer than a year -- the longest OpenUsage reports is a
+// week -- so anything above this is periodDurationMs with the /1000 forgotten.
+// 604800000 fits in an int32, so without this ceiling nothing else catches it.
+// A bound, not a proof: a short window left in milliseconds still lands under it.
+const MAX_PERIOD_SEC = 366 * 24 * 60 * 60;
+
 // Monkey C's Number is signed 32-bit, so every integer on the wire has to fit
 // here or the watch silently wraps it.
 const INT32_MIN = -2147483648;
@@ -99,6 +105,16 @@ function epochSec(o: Record<string, unknown>, key: string, where: string): numbe
   return int(o, key, where);
 }
 
+function durationSec(o: Record<string, unknown>, key: string, where: string): number {
+  // Ahead of the int32 check for the same reason as epochSec: a monthly period in
+  // milliseconds blows both bounds and only this message names the actual bug.
+  const v = o[key];
+  if (typeof v === 'number' && v > MAX_PERIOD_SEC) {
+    throw new Error(`${where}.${key} looks like milliseconds; must be a duration in seconds`);
+  }
+  return intAtLeast(o, key, where, 1);
+}
+
 function arr(o: Record<string, unknown>, key: string, where: string): unknown[] {
   const v = o[key];
   if (!Array.isArray(v)) throw new Error(`${where}.${key} must be an array`);
@@ -114,7 +130,7 @@ function progressLine(u: unknown, where: string): ProgressLine {
     // the CYD and the watch compute, so it never gets past the push.
     limit: intAtLeast(u, 'limit', where, 1),
     resetsAt: epochSec(u, 'resetsAt', where),
-    periodSec: intAtLeast(u, 'periodSec', where, 1),
+    periodSec: durationSec(u, 'periodSec', where),
   };
 }
 

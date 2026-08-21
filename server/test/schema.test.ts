@@ -94,6 +94,15 @@ describe('validatePushBody', () => {
     reject((b) => (b.providers[0].progress[0].used = -2147483649), 'used');
   });
 
+  it('rejects a periodSec that looks like milliseconds', () => {
+    // The weekly window with the /1000 dropped. It fits in an int32, so the only
+    // thing standing between it and a clean push is the one-year ceiling.
+    reject((b) => (b.providers[0].progress[0].periodSec = 604800000), 'milliseconds');
+    // A year itself is fine; the longest real window is a week.
+    expect(accept((b) => (b.providers[0].progress[0].periodSec = 366 * 24 * 60 * 60))
+      .providers[0]!.progress[0]!.periodSec).toBe(31622400);
+  });
+
   it('rejects progress numbers that break every percentage downstream', () => {
     reject((b) => (b.providers[0].progress[0].used = -5), 'used');
     reject((b) => (b.providers[0].progress[0].limit = 0), 'limit');
