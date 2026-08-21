@@ -218,6 +218,53 @@ void test_post_process_is_deterministic(void) {
     TEST_ASSERT_EQUAL_MEMORY(a, b, 32 * 16);
 }
 
+void test_post_process_applies_bloom(void) {
+    cb::Canvas c = mkc();
+    c.fill(12, 6, 8, 4, 255);  // small solid block in the middle
+    cb::EffectParams p = cb::EffectParams::defaults();
+    p.bloom_strength = 255;    // maximize bloom to ensure adjacent pixel is affected
+    uint8_t ring[9 * 32];
+    cb::post_process(c, p, 0, ring, sizeof ring);
+    // Pixel just outside the block should have gotten light via bloom.
+    // Scanlines, vignette, and gain only darken, so a 0 pixel can only become
+    // non-zero through bloom.
+    TEST_ASSERT_TRUE(c.at(11, 7) > 0);
+}
+
+void test_post_process_applies_vignette(void) {
+    cb::Canvas c = mkc();
+    c.fill(0, 0, 32, 16, 200);  // uniform field
+    cb::EffectParams p = cb::EffectParams::defaults();
+    uint8_t ring[9 * 32];
+    cb::post_process(c, p, 0, ring, sizeof ring);
+    // On even rows, scanlines don't apply. Bloom is uniform on a uniform field.
+    // Only vignette varies with position, darkening corners.
+    TEST_ASSERT_TRUE(c.at(0, 0) < c.at(16, 8));
+}
+
+void test_post_process_applies_flicker_gain(void) {
+    uint8_t a[32 * 16], b[32 * 16];
+    uint8_t ring[9 * 32];
+    cb::EffectParams p = cb::EffectParams::defaults();
+
+    // First run with flicker_amount = 0 (flicker_gain returns 255, a no-op)
+    memset(a, 0, 32 * 16);
+    cb::Canvas c1(a, 32, 16);
+    c1.fill(0, 0, 32, 16, 200);
+    p.flicker_amount = 0;
+    cb::post_process(c1, p, 1, ring, sizeof ring);
+
+    // Second run with flicker_amount = 200, same frame number
+    memset(b, 0, 32 * 16);
+    cb::Canvas c2(b, 32, 16);
+    c2.fill(0, 0, 32, 16, 200);
+    p.flicker_amount = 200;
+    cb::post_process(c2, p, 1, ring, sizeof ring);
+
+    // The buffers should NOT be identical (flicker_gain should scale pixels differently)
+    TEST_ASSERT_FALSE(memcmp(a, b, 32 * 16) == 0);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_zero_intensity_is_black);
@@ -245,5 +292,8 @@ int main(int, char**) {
     RUN_TEST(test_vignette_leaves_centre_alone);
     RUN_TEST(test_post_process_runs_all_stages);
     RUN_TEST(test_post_process_is_deterministic);
+    RUN_TEST(test_post_process_applies_bloom);
+    RUN_TEST(test_post_process_applies_vignette);
+    RUN_TEST(test_post_process_applies_flicker_gain);
     return UNITY_END();
 }
