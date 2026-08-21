@@ -4,6 +4,7 @@
 #include "core/canvas.h"
 #include "core/crt.h"
 #include "core/fixture.h"
+#include "core/frame.h"
 #include "core/screen.h"
 #include "core/types.h"
 #include "host/png.h"
@@ -12,21 +13,26 @@
 // test_build_src pulls src/host/ into every test binary too, which already
 // supplies its own main() via Unity -- keep this one out of that build.
 #ifndef PIO_UNIT_TESTING
-static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];
+static uint8_t g_accum[cb::SCREEN_W * cb::SCREEN_H];   // the accumulator
+static uint8_t g_shown[cb::SCREEN_W * cb::SCREEN_H];   // post-processed output
 static uint8_t g_ring[9 * cb::SCREEN_W];
 
 // The clock string is a literal, not derived from clock_string(): localtime_r
 // would render a different hour on a machine in another timezone, and the
 // golden would stop matching for a reason that has nothing to do with the
 // renderer. The golden test passes the same literal.
-static void render_reference(cb::Canvas& c, const cb::EffectParams& fx) {
-    memset(c.data(), 0, static_cast<size_t>(c.width()) * c.height());
-    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
-    cb::post_process(c, fx, 0, g_ring, sizeof g_ring);
+//
+// Frame 0 from a cleared accumulator, which is what every still image here
+// wants. render_frame() owns the decay/draw/copy/post-process order.
+static void render_reference(cb::Canvas& out, const cb::EffectParams& fx) {
+    memset(g_accum, 0, sizeof g_accum);
+    cb::Canvas accum(g_accum, cb::SCREEN_W, cb::SCREEN_H);
+    cb::render_frame(accum, out, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS,
+                     "14:44", fx, 0, g_ring, sizeof g_ring);
 }
 
 static int run_png() {
-    cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+    cb::Canvas c(g_shown, cb::SCREEN_W, cb::SCREEN_H);
     render_reference(c, cb::EffectParams::defaults());
     if (!cbhost::write_png_from_canvas("out/ambient.png", c)) {
         fprintf(stderr, "write failed -- does out/ exist?\n");
@@ -36,12 +42,11 @@ static int run_png() {
     return 0;
 }
 
-// Not run in this task -- effect defaults (bloom_strength in particular) are
-// about to change based on a look at the real panel, and blessing now would
-// freeze a look we already know is wrong. A human picks values first via
-// --contact, then blesses.
+// Regenerates goldens/ambient-claude.raw (and a .png to eyeball it with).
+// Run this deliberately, after a look at the result: the golden test treats
+// whatever is in that file as the truth.
 static int run_bless() {
-    cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+    cb::Canvas c(g_shown, cb::SCREEN_W, cb::SCREEN_H);
     render_reference(c, cb::EffectParams::defaults());
     FILE* f = fopen("goldens/ambient-claude.raw", "wb");
     if (!f) { fprintf(stderr, "cannot write goldens/ -- does it exist?\n"); return 1; }
@@ -68,12 +73,12 @@ static int render_sweep_sheet(const char* path, const char* label_prefix,
         const uint8_t value = static_cast<uint8_t>(i * step);
         fx.*field = value;
 
-        cb::Canvas tile(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+        cb::Canvas tile(g_shown, cb::SCREEN_W, cb::SCREEN_H);
         render_reference(tile, fx);
 
         // Labeled after post_process so the label stays crisp regardless of
         // scanline/bloom settings, in the chart band's dark top-right corner
-        // (the "DAILY CONSUMPTION - 30D" title occupies the top-left; bars
+        // (the "DAILY CONSUMPTION" title occupies the top-left; bars
         // start below CHART_Y+14).
         char label[24];
         snprintf(label, sizeof label, "%s=%d", label_prefix, value);
@@ -84,7 +89,7 @@ static int render_sweep_sheet(const char* path, const char* label_prefix,
         const int ox = (i % 3) * cb::SCREEN_W, oy = (i / 3) * cb::SCREEN_H;
         for (int y = 0; y < cb::SCREEN_H; y++)
             memcpy(sheet + static_cast<size_t>(oy + y) * TW + ox,
-                   g_buf + static_cast<size_t>(y) * cb::SCREEN_W, cb::SCREEN_W);
+                   g_shown + static_cast<size_t>(y) * cb::SCREEN_W, cb::SCREEN_W);
     }
 
     cb::Canvas s(sheet, TW, TH);
@@ -115,13 +120,13 @@ static int run_contact_bloom_radius() {
             fx.bloom_radius = radii[row];
             fx.bloom_strength = strengths[col];
 
-            cb::Canvas tile(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+            cb::Canvas tile(g_shown, cb::SCREEN_W, cb::SCREEN_H);
             render_reference(tile, fx);
 
             uint64_t lit = 0, sum = 0;
             const size_t n = static_cast<size_t>(cb::SCREEN_W) * cb::SCREEN_H;
             for (size_t p = 0; p < n; p++) {
-                const uint8_t v = g_buf[p];
+                const uint8_t v = g_shown[p];
                 sum += v;
                 if (v >= 8) lit++;
             }
@@ -140,7 +145,7 @@ static int run_contact_bloom_radius() {
             const int ox = col * cb::SCREEN_W, oy = row * cb::SCREEN_H;
             for (int y = 0; y < cb::SCREEN_H; y++)
                 memcpy(sheet + static_cast<size_t>(oy + y) * TW + ox,
-                       g_buf + static_cast<size_t>(y) * cb::SCREEN_W, cb::SCREEN_W);
+                       g_shown + static_cast<size_t>(y) * cb::SCREEN_W, cb::SCREEN_W);
         }
     }
 
@@ -174,36 +179,27 @@ static int64_t now_ms() {
     return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
 }
 
-// The only mode that runs successive frames -- see the accumulator/copy
-// split below. This is where a frame-over-frame bug (like post_process
-// output leaking back into the accumulator and compounding) would show up;
-// a single-frame PNG or golden can't catch that.
+// The only host mode that runs successive frames. A frame-over-frame bug
+// (post_process output leaking back into the accumulator and compounding)
+// would show up here and nowhere else in this file -- test_frame covers the
+// same ground headlessly.
 static int run_tui(bool live) {
     int cols = 0, rows = 0;
     if (!cbhost::tui_size(cols, rows)) { fprintf(stderr, "not a terminal\n"); return 1; }
     const int scale = cbhost::tui_scale(cols, rows);
 
     const cb::EffectParams fx = cb::EffectParams::defaults();
-    memset(g_buf, 0, sizeof g_buf);
-    cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
+    memset(g_accum, 0, sizeof g_accum);
+    cb::Canvas accum(g_accum, cb::SCREEN_W, cb::SCREEN_H);
+    cb::Canvas out(g_shown, cb::SCREEN_W, cb::SCREEN_H);
 
     cbhost::tui_begin();
     for (uint32_t frame = 0; !cbhost::tui_interrupted(); frame++) {
         const int64_t t = live ? now_ms() : cb::FIXTURE_REFERENCE_MS;
         char clk[8]; clock_string(t, clk, sizeof clk);
 
-        c.decay(fx.decay);
-        cb::render_ambient(c, cb::fixture_snapshot(), 0, t, clk);
-
-        // post_process mutates the canvas it's given, so it runs on a copy.
-        // g_buf/c stay the undimmed accumulator that decay() and
-        // render_ambient() draw into next frame; post-processed output never
-        // feeds back in. This second full-size buffer is host-only -- core/
-        // still uses one accumulator, and the device never makes this copy.
-        static uint8_t shown[cb::SCREEN_W * cb::SCREEN_H];
-        memcpy(shown, g_buf, sizeof shown);
-        cb::Canvas out(shown, cb::SCREEN_W, cb::SCREEN_H);
-        cb::post_process(out, fx, frame, g_ring, sizeof g_ring);
+        cb::render_frame(accum, out, cb::fixture_snapshot(), 0, t, clk, fx,
+                         frame, g_ring, sizeof g_ring);
 
         cbhost::tui_draw(out, scale);
         if (cbhost::tui_interrupted()) break;

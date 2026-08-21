@@ -4,6 +4,7 @@
 #include "core/canvas.h"
 #include "core/crt.h"
 #include "core/fixture.h"
+#include "core/frame.h"
 #include "core/palette.h"
 #include "core/screen.h"
 #include "core/types.h"
@@ -11,11 +12,8 @@
 static TFT_eSPI tft;
 
 static uint8_t g_buf[cb::SCREEN_W * cb::SCREEN_H];   // the one accumulator
-// Post-processing must never write back into the accumulator: bloom adds
-// light and the accumulator only loses ~18/frame to decay, so feeding
-// post-processed pixels back in runs bloom away to saturation frame over
-// frame while vignette compounds the opposite way. Post-process a copy
-// instead and push pixels from that copy -- do not "optimise" this away.
+// The post-processed copy that actually gets pushed. cb::render_frame() owns
+// the accumulator/copy split and the reason for it -- see core/frame.h.
 //
 // This buffer is heap-allocated in setup(), NOT a second static array like
 // g_buf: this board's static .bss/.data DRAM segment (dram0_0_seg) is only
@@ -33,6 +31,11 @@ static uint16_t g_line[cb::SCREEN_W];
 static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
 
 static uint32_t g_frame = 0;
+
+// core/ has no clock of its own, so hand render_frame() ours for the
+// per-stage timing. micros() returns unsigned long, a distinct type from
+// uint32_t here even at the same width, hence the wrapper.
+static uint32_t now_us() { return static_cast<uint32_t>(micros()); }
 
 void setup() {
     Serial.begin(115200);
@@ -69,15 +72,11 @@ void loop() {
     // and advanced by wall milliseconds since boot. The gauges therefore age.
     const int64_t now = cb::FIXTURE_REFERENCE_MS + (int64_t)millis();
 
-    const uint32_t t_render_start = micros();
-    c.decay(fx.decay);
-    cb::render_ambient(c, cb::fixture_snapshot(), 0, now, "--:--");
-    const uint32_t t_render_end = micros();
-
-    // Post-process a copy of the accumulator, never the accumulator itself.
-    memcpy(g_shown, g_buf, sizeof g_buf);
     cb::Canvas shown(g_shown, cb::SCREEN_W, cb::SCREEN_H);
-    cb::post_process(shown, fx, g_frame, g_ring, sizeof g_ring);
+    cb::FrameTiming timing{now_us, 0, 0};
+    const uint32_t t_frame_start = micros();
+    cb::render_frame(c, shown, cb::fixture_snapshot(), 0, now, "--:--", fx,
+                     g_frame, g_ring, sizeof g_ring, &timing);
     const uint32_t t_post_end = micros();
 
     tft.startWrite();
@@ -90,10 +89,10 @@ void loop() {
     tft.endWrite();
     const uint32_t t_push_end = micros();
 
-    const uint32_t render_us = t_render_end - t_render_start;
-    const uint32_t post_us = t_post_end - t_render_end;
+    const uint32_t render_us = timing.render_us;
+    const uint32_t post_us = timing.post_us;
     const uint32_t push_us = t_push_end - t_post_end;
-    const uint32_t total_us = t_push_end - t_render_start;
+    const uint32_t total_us = t_push_end - t_frame_start;
 
     // Print roughly every 30 frames so the serial output stays readable.
     if ((g_frame % 30) == 0) {
