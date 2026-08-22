@@ -9,6 +9,7 @@
 #include "core/palette.h"
 #include "core/screen.h"
 #include "core/types.h"
+#include "device/net.h"
 
 static TFT_eSPI tft;
 
@@ -21,6 +22,10 @@ static uint16_t g_line[cb::SCREEN_W];
 static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
 
 static uint32_t g_frame = 0;
+
+// One association attempt. Longer than a healthy router needs, short enough
+// that a wrong password shows up as a state on the panel rather than a hang.
+static const uint32_t WIFI_TIMEOUT_MS = 15000;
 
 // cb::render_frame() hands each finished row here instead of filling a second
 // canvas -- see core/frame.h for why post-processing stays off the
@@ -102,9 +107,17 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
 
     cb::palette_build_rgb565_table(g_palette);
+
+    // Last, and deliberately: the framebuffer already holds its contiguous run
+    // and the panel is lit, so the screen has something to show while the
+    // radio associates. wifi_begin() does not block -- loop() drives it.
+    cbnet::wifi_begin(WIFI_TIMEOUT_MS);
+    print_heap("after wifi start");
 }
 
 void loop() {
+    cbnet::wifi_poll();
+
     const cb::EffectParams fx = cb::EffectParams::defaults();
     cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
 
@@ -127,9 +140,9 @@ void loop() {
     // Post-processing and the SPI push are one stage now: each row goes
     // straight to the panel as it is finished, so they cannot be timed apart.
     if ((g_frame % 30) == 0) {   // roughly every 30 frames, so serial stays readable
-        Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus\n",
+        Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus %s\n",
                       (unsigned)timing.render_us, (unsigned)timing.post_us,
-                      (unsigned)total_us);
+                      (unsigned)total_us, cbnet::wifi_status_text());
     }
 
     g_frame++;
