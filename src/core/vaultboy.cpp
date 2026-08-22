@@ -168,32 +168,20 @@ uint8_t intensity_of(char ch) {
     }
 }
 
-// Severity, so the worst window across a provider can be picked with a max.
-// Unknown sits with OnPace: a window too young to judge deserves a neutral
-// face, not a cheerful one.
-int severity(PaceState s) {
-    switch (s) {
-        case PaceState::Burnout: return 2;
-        case PaceState::OnPace:  return 1;
-        case PaceState::Unknown: return 1;
-        default:                 return 0;   // Surplus, Ready
-    }
-}
-
 }  // namespace
 
 BoyMood boy_mood(const Provider& prov, int64_t now_ms) {
-    int worst = -1;
-    for (int i = 0; i < prov.progress_count && prov.progress; i++) {
-        const Pace p = compute_pace(prov.progress[i], now_ms);
-        if (!p.valid) continue;
-        const int s = severity(p.state);
-        if (s > worst) worst = s;
+    // Same ordering the caption uses, so his face and the words under it can
+    // never disagree about which window is the problem.
+    switch (worst_pace(prov, now_ms)) {
+        case PaceState::Burnout: return BoyMood::Fried;
+        case PaceState::Surplus: return BoyMood::Fine;
+        case PaceState::Ready:   return BoyMood::Fine;
+        // OnPace, and Unknown -- which is also what an unreadable provider
+        // comes back as. Nothing readable at all is not good news, so it is
+        // not a thumbs up.
+        default:                 return BoyMood::Steady;
     }
-    // Nothing readable at all is not good news, so it is not a thumbs up.
-    if (worst < 0) return BoyMood::Steady;
-    if (worst >= 2) return BoyMood::Fried;
-    return worst == 1 ? BoyMood::Steady : BoyMood::Fine;
 }
 
 void draw_vault_boy(Canvas& c, int x, int y, BoyMood mood) {

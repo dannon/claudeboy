@@ -417,6 +417,98 @@ void test_a_provider_with_no_text_still_draws_the_log(void) {
     TEST_ASSERT_TRUE(caps_no_text * 2 < caps_with_text);
 }
 
+// --- caption ----------------------------------------------------------------
+
+void test_worst_pace_reports_the_window_in_the_most_trouble(void) {
+    const cb::ProgressLine burning[] = {
+        {"SESSION", 5,   100, REF + 4 * HOUR,  5 * HOUR},
+        {"WEEKLY",  100, 100, REF + 40 * HOUR, 168 * HOUR},
+    };
+    cb::Provider p{"x", "X", "", REF, burning, 2, nullptr, 0, nullptr, 0};
+    TEST_ASSERT_EQUAL(cb::PaceState::Burnout, cb::worst_pace(p, REF));
+}
+
+void test_windows_tied_on_severity_resolve_to_the_first(void) {
+    // A session block that has not started sits beside a comfortable weekly.
+    // Both are severity zero; the session is the newsworthy one and comes
+    // first, so that is what gets reported.
+    const cb::ProgressLine tied[] = {
+        {"SESSION", 0,  100, 0,               5 * HOUR},
+        {"WEEKLY",  10, 100, REF + 40 * HOUR, 168 * HOUR},
+    };
+    cb::Provider p{"x", "X", "", REF, tied, 2, nullptr, 0, nullptr, 0};
+    TEST_ASSERT_EQUAL(cb::PaceState::Ready, cb::worst_pace(p, REF));
+}
+
+void test_nothing_readable_is_an_unknown_pace(void) {
+    const cb::ProgressLine broken[] = {{"X", 12, 0, REF + HOUR, 2 * HOUR}};
+    cb::Provider p{"x", "X", "", REF, broken, 1, nullptr, 0, nullptr, 0};
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, cb::worst_pace(p, REF));
+    cb::Provider none{"x", "X", "", REF, nullptr, 0, nullptr, 0, nullptr, 0};
+    TEST_ASSERT_EQUAL(cb::PaceState::Unknown, cb::worst_pace(none, REF));
+}
+
+void test_a_stale_reading_gets_a_remark_about_the_link(void) {
+    // Whatever the pace was when these numbers were fetched, saying it in the
+    // present tense over hour-old figures would be a lie.
+    TEST_ASSERT_EQUAL_STRING("AWAITING TELEMETRY",
+                             cb::vault_caption(cb::Freshness::Stale, cb::PaceState::Surplus));
+    TEST_ASSERT_EQUAL_STRING("TELEMETRY LINK SEVERED",
+                             cb::vault_caption(cb::Freshness::SignalLost, cb::PaceState::Burnout));
+}
+
+void test_every_pace_has_something_to_say(void) {
+    const cb::PaceState all[] = {cb::PaceState::Surplus, cb::PaceState::OnPace,
+                                 cb::PaceState::Burnout, cb::PaceState::Unknown,
+                                 cb::PaceState::Ready};
+    const char* seen[5];
+    for (int i = 0; i < 5; i++) {
+        seen[i] = cb::vault_caption(cb::Freshness::Fresh, all[i]);
+        TEST_ASSERT_NOT_NULL(seen[i]);
+        TEST_ASSERT_TRUE(strlen(seen[i]) > 0);
+        for (int j = 0; j < i; j++) TEST_ASSERT_TRUE(strcmp(seen[i], seen[j]) != 0);
+    }
+}
+
+void test_no_caption_collides_with_the_longest_annotation(void) {
+    char note[24];
+    cb::format_staleness(cb::Freshness::SignalLost, 500LL * 86400 * 1000, note, sizeof note);
+    const int right = cb::text_width(note, 1);
+    const cb::Freshness fs[] = {cb::Freshness::Fresh, cb::Freshness::Stale,
+                                cb::Freshness::SignalLost};
+    const cb::PaceState ps[] = {cb::PaceState::Surplus, cb::PaceState::OnPace,
+                                cb::PaceState::Burnout, cb::PaceState::Unknown,
+                                cb::PaceState::Ready};
+    for (cb::Freshness f : fs)
+        for (cb::PaceState s : ps) {
+            const int left = cb::text_width(cb::vault_caption(f, s), 1);
+            TEST_ASSERT_TRUE(left + 6 + right <= cb::SCREEN_W - 2 * cb::MARGIN);
+        }
+}
+
+void test_burnout_is_the_only_caption_drawn_bright(void) {
+    cb::Canvas c = mks();
+    const cb::ProgressLine burning[] = {{"SESSION", 100, 100, REF + 4 * HOUR, 5 * HOUR}};
+    cb::Provider prov{"claude", "CLAUDE", "", REF, burning, 1, nullptr, 0, nullptr, 0};
+    cb::UsageSnapshot snap{&prov, 1, REF, 0};
+    cb::render_ambient(c, snap, 0, REF, "14:44");
+    const long hot = sum_in(c, cb::MARGIN, cb::FOOT_Y, cb::SCREEN_W / 2, cb::FONT_H);
+
+    cb::Canvas d = mks();
+    const cb::ProgressLine easy[] = {{"SESSION", 1, 100, REF + 4 * HOUR, 5 * HOUR}};
+    cb::Provider prov2{"claude", "CLAUDE", "", REF, easy, 1, nullptr, 0, nullptr, 0};
+    cb::UsageSnapshot snap2{&prov2, 1, REF, 0};
+    cb::render_ambient(d, snap2, 0, REF, "14:44");
+    const long calm = sum_in(d, cb::MARGIN, cb::FOOT_Y, cb::SCREEN_W / 2, cb::FONT_H);
+
+    // Both captions are there; the one worth reading first is brighter, per
+    // lit pixel, not merely longer.
+    TEST_ASSERT_TRUE(hot > 0 && calm > 0);
+    const int hot_len = (int)strlen(cb::vault_caption(cb::Freshness::Fresh, cb::PaceState::Burnout));
+    const int calm_len = (int)strlen(cb::vault_caption(cb::Freshness::Fresh, cb::PaceState::Surplus));
+    TEST_ASSERT_TRUE(hot / hot_len > calm / calm_len);
+}
+
 // --- rad meter --------------------------------------------------------------
 
 // Where the needle's own pixels fall, clear of the arc and of the quarter
@@ -715,6 +807,13 @@ int main(int, char**) {
     RUN_TEST(test_chart_total_sums_the_tail);
     RUN_TEST(test_exposure_log_stays_in_the_panel);
     RUN_TEST(test_a_provider_with_no_text_still_draws_the_log);
+    RUN_TEST(test_worst_pace_reports_the_window_in_the_most_trouble);
+    RUN_TEST(test_windows_tied_on_severity_resolve_to_the_first);
+    RUN_TEST(test_nothing_readable_is_an_unknown_pace);
+    RUN_TEST(test_a_stale_reading_gets_a_remark_about_the_link);
+    RUN_TEST(test_every_pace_has_something_to_say);
+    RUN_TEST(test_no_caption_collides_with_the_longest_annotation);
+    RUN_TEST(test_burnout_is_the_only_caption_drawn_bright);
     RUN_TEST(test_the_needle_deflects_with_the_rate);
     RUN_TEST(test_a_rate_past_full_scale_pins_rather_than_overshooting);
     RUN_TEST(test_an_unknown_rate_rests_dim_and_shows_no_figure);

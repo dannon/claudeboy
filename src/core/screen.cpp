@@ -91,9 +91,9 @@ void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clo
     c.hline(MARGIN, TAB_H, SCREEN_W - 2 * MARGIN, I_RULE);
 }
 
-void draw_footer(Canvas& c, const char* left, const char* right) {
+void draw_footer(Canvas& c, const char* left, const char* right, uint8_t left_v) {
     c.hline(MARGIN, FOOT_Y - 4, SCREEN_W - 2 * MARGIN, I_RULE);
-    if (left)  draw_text(c, MARGIN, FOOT_Y, left, I_DIM, 1);
+    if (left)  draw_text(c, MARGIN, FOOT_Y, left, left_v, 1);
     if (right) draw_text(c, SCREEN_W - MARGIN - text_width(right, 1), FOOT_Y, right, I_NORMAL, 1);
 }
 
@@ -420,6 +420,48 @@ void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v) {
     }
 }
 
+namespace {
+
+// Ordering for worst_pace(). Unknown sits with OnPace: a window too young to
+// judge earns a neutral remark, not a cheerful one.
+int pace_severity(PaceState s) {
+    switch (s) {
+        case PaceState::Burnout: return 2;
+        case PaceState::OnPace:  return 1;
+        case PaceState::Unknown: return 1;
+        default:                 return 0;   // Surplus, Ready
+    }
+}
+
+}  // namespace
+
+PaceState worst_pace(const Provider& prov, int64_t now_ms) {
+    PaceState worst = PaceState::Unknown;
+    int best = -1;
+    for (int i = 0; i < prov.progress_count && prov.progress; i++) {
+        const Pace p = compute_pace(prov.progress[i], now_ms);
+        if (!p.valid) continue;
+        const int s = pace_severity(p.state);
+        if (s > best) { best = s; worst = p.state; }
+    }
+    return worst;
+}
+
+const char* vault_caption(Freshness f, PaceState worst) {
+    // A stale reading gets a remark about the link rather than about the
+    // numbers: whatever the pace was when these were fetched, saying it in
+    // the present tense over hour-old figures would be a lie.
+    if (f == Freshness::SignalLost) return "TELEMETRY LINK SEVERED";
+    if (f == Freshness::Stale)      return "AWAITING TELEMETRY";
+    switch (worst) {
+        case PaceState::Burnout: return "DOSE EXCEEDS SAFE LIMITS";
+        case PaceState::OnPace:  return "EXPOSURE WITHIN PARAMETERS";
+        case PaceState::Surplus: return "VAULT-TEC THANKS YOU";
+        case PaceState::Ready:   return "NEW SHIFT BEGINS";
+        default:                 return "CALIBRATING";
+    }
+}
+
 void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
     const int cx = x + w / 2, cy = y + 44, r = 32;
     static const float kPi = 3.14159265f;
@@ -505,8 +547,10 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     if (f != Freshness::Fresh) dim_band(c, HERO_Y, PANEL_Y + PANEL_H - HERO_Y, I_STALE_SCALE);
 
     // The exposure log carries the day's figures now, so the footer's left
-    // half is free for something that is not another number.
-    draw_footer(c, nullptr, annotated ? note : "WORKING");
+    // half says what the terminal makes of them.
+    const PaceState worst = worst_pace(prov, now_ms);
+    draw_footer(c, vault_caption(f, worst), annotated ? note : "WORKING",
+                worst == PaceState::Burnout && f == Freshness::Fresh ? I_BRIGHT : I_DIM);
 }
 
 }  // namespace cb

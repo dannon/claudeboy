@@ -91,7 +91,19 @@ void format_duration(int64_t ms, char* out, size_t n);
 void format_clock(int64_t now_ms, char* out, size_t n);
 
 void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clock);
-void draw_footer(Canvas& c, const char* left, const char* right);
+void draw_footer(Canvas& c, const char* left, const char* right, uint8_t left_v = I_DIM);
+
+// The worst verdict across a provider's windows: Burnout beats OnPace and
+// Unknown, which beat Surplus and Ready. Windows tied on severity resolve to
+// the first one the provider sent, so a session block that has not started
+// yet is reported ahead of a weekly ration that is merely comfortable.
+// Unknown when nothing in the provider is readable at all.
+PaceState worst_pace(const Provider& prov, int64_t now_ms);
+
+// What the terminal has to say about it, in Vault-Tec's house style: sunny
+// about figures that are not. Never longer than 26 characters, so it always
+// clears the staleness annotation on the other end of the footer.
+const char* vault_caption(Freshness f, PaceState worst);
 
 // "AP" for a window that refills within a day, "HP" for one that does not.
 // Action points come back before the next fight; health does not, which is
