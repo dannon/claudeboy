@@ -306,6 +306,117 @@ void test_unknown_state_draws_no_tick(void) {
                                     cb::hero_width() - 10, 3));
 }
 
+// --- exposure log -----------------------------------------------------------
+
+void test_format_rads_abbreviates_with_one_decimal(void) {
+    char b[12];
+    cb::format_rads(0, b, sizeof b);             TEST_ASSERT_EQUAL_STRING("0", b);
+    cb::format_rads(742, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("742", b);
+    cb::format_rads(999, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("999", b);
+    cb::format_rads(1000, b, sizeof b);          TEST_ASSERT_EQUAL_STRING("1.0K", b);
+    cb::format_rads(56278305, b, sizeof b);      TEST_ASSERT_EQUAL_STRING("56.3M", b);
+    cb::format_rads(208264047, b, sizeof b);     TEST_ASSERT_EQUAL_STRING("208.3M", b);
+    cb::format_rads(4800000000LL, b, sizeof b);  TEST_ASSERT_EQUAL_STRING("4.8B", b);
+    // Rounding must carry into the whole part rather than print "9.10M".
+    cb::format_rads(9990000, b, sizeof b);       TEST_ASSERT_EQUAL_STRING("10.0M", b);
+    // A count we could not work out reads as absent, not as zero.
+    cb::format_rads(-1, b, sizeof b);            TEST_ASSERT_EQUAL_STRING("--", b);
+    // Nothing here may outgrow the column it is right-aligned in.
+    cb::format_rads(999900000000LL, b, sizeof b);
+    TEST_ASSERT_TRUE(cb::text_width(b, 1) <= 106);
+}
+
+void test_parse_caps_reads_the_dollar_figure(void) {
+    // The shapes the provider has actually sent, old separator and new.
+    TEST_ASSERT_EQUAL_INT64(56, cb::parse_caps("$56.67 - 56.3M"));
+    TEST_ASSERT_EQUAL_INT64(4512, cb::parse_caps("$4,512 - 4.8B"));
+    TEST_ASSERT_EQUAL_INT64(68, cb::parse_caps("$68.52 \xc2\xb7 98.1M tokens"));
+    TEST_ASSERT_EQUAL_INT64(0, cb::parse_caps("$0.00"));
+    TEST_ASSERT_EQUAL_INT64(4869, cb::parse_caps("$4,869.05"));
+    // Nothing to read is -1, not 0 -- a blank column and a genuine zero are
+    // different facts.
+    TEST_ASSERT_EQUAL_INT64(-1, cb::parse_caps("56.3M tokens"));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::parse_caps("$"));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::parse_caps("$abc"));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::parse_caps(""));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::parse_caps(nullptr));
+}
+
+void test_format_caps_groups_thousands(void) {
+    char b[16];
+    cb::format_caps(0, b, sizeof b);      TEST_ASSERT_EQUAL_STRING("0", b);
+    cb::format_caps(68, b, sizeof b);     TEST_ASSERT_EQUAL_STRING("68", b);
+    cb::format_caps(999, b, sizeof b);    TEST_ASSERT_EQUAL_STRING("999", b);
+    cb::format_caps(1000, b, sizeof b);   TEST_ASSERT_EQUAL_STRING("1,000", b);
+    cb::format_caps(4869, b, sizeof b);   TEST_ASSERT_EQUAL_STRING("4,869", b);
+    cb::format_caps(1234567, b, sizeof b); TEST_ASSERT_EQUAL_STRING("1,234,567", b);
+    cb::format_caps(-1, b, sizeof b);     TEST_ASSERT_EQUAL_STRING("--", b);
+    // A buffer too small truncates and still terminates.
+    char small[4];
+    cb::format_caps(1234567, small, sizeof small);
+    TEST_ASSERT_TRUE(strlen(small) < sizeof small);
+}
+
+void test_chart_total_sums_the_tail(void) {
+    const cb::Provider& p = cb::fixture_snapshot().providers[0];
+    TEST_ASSERT_EQUAL_INT64(56278305LL, cb::chart_total(p, 1));
+    TEST_ASSERT_EQUAL_INT64(56278305LL + 208264047LL, cb::chart_total(p, 2));
+    // 31 days on the wire, so a 30-day total is available and a 31-day one is
+    // the whole array. Asking for more than exists is -1, not a short sum.
+    TEST_ASSERT_TRUE(cb::chart_total(p, 30) > 0);
+    TEST_ASSERT_TRUE(cb::chart_total(p, 31) > cb::chart_total(p, 30));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::chart_total(p, 32));
+    TEST_ASSERT_EQUAL_INT64(-1, cb::chart_total(p, 0));
+
+    cb::Provider empty{"x", "X", "", 0, nullptr, 0, nullptr, 0, nullptr, 0};
+    TEST_ASSERT_EQUAL_INT64(-1, cb::chart_total(empty, 1));
+}
+
+void test_exposure_log_stays_in_the_panel(void) {
+    cb::Canvas c = mks();
+    const cb::Provider& p = cb::fixture_snapshot().providers[0];
+    cb::draw_exposure_log(c, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W, p);
+    TEST_ASSERT_TRUE(lit_in(c, cb::LOG_X, cb::PANEL_Y, cb::LOG_W, cb::PANEL_H) > 200);
+    // Nothing left of the log's column, nothing past the panel's right border,
+    // and nothing above or below the panel.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::LOG_X, cb::SCREEN_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::LOG_X + cb::LOG_W, 0,
+                                    cb::SCREEN_W - cb::LOG_X - cb::LOG_W, cb::SCREEN_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::SCREEN_W, cb::PANEL_Y));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::PANEL_Y + cb::PANEL_H, cb::SCREEN_W,
+                                    cb::SCREEN_H - cb::PANEL_Y - cb::PANEL_H));
+}
+
+void test_a_provider_with_no_text_still_draws_the_log(void) {
+    cb::Canvas c = mks();
+    // Chart but no text: the RADS column is derived from the chart and stands
+    // on its own, so it must still be there with the caps column blank.
+    cb::Provider p = cb::fixture_snapshot().providers[0];
+    p.text = nullptr; p.text_count = 0;
+    cb::draw_exposure_log(c, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W, p);
+    const int rads_r = cb::LOG_X + 106;
+    const int caps_w = cb::LOG_X + cb::LOG_W - rads_r;
+    // mks() hands out the one shared buffer, so read both counts off this
+    // render before starting the next one.
+    const int rads_no_text = lit_in(c, cb::LOG_X, cb::PANEL_Y, rads_r - cb::LOG_X, cb::PANEL_H);
+    const int caps_no_text = lit_in(c, rads_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
+
+    cb::Canvas full = mks();
+    cb::draw_exposure_log(full, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W,
+                          cb::fixture_snapshot().providers[0]);
+    const int rads_with_text = lit_in(full, cb::LOG_X, cb::PANEL_Y, rads_r - cb::LOG_X, cb::PANEL_H);
+    const int caps_with_text = lit_in(full, rads_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
+
+    // The rads column comes from the chart and does not care about text at all.
+    TEST_ASSERT_TRUE(rads_no_text > 100);
+    TEST_ASSERT_EQUAL_INT(rads_with_text, rads_no_text);
+
+    // The caps column keeps its header and says "--" rather than inventing
+    // figures, so it is still lit but far emptier than one carrying numbers.
+    TEST_ASSERT_TRUE(caps_no_text > 0);
+    TEST_ASSERT_TRUE(caps_no_text * 2 < caps_with_text);
+}
+
 // --- staleness --------------------------------------------------------------
 
 void test_freshness_boundaries(void) {
@@ -521,6 +632,12 @@ int main(int, char**) {
     RUN_TEST(test_verdict_and_countdown_stay_inside_the_hero);
     RUN_TEST(test_invalid_pace_draws_no_gauge);
     RUN_TEST(test_unknown_state_draws_no_tick);
+    RUN_TEST(test_format_rads_abbreviates_with_one_decimal);
+    RUN_TEST(test_parse_caps_reads_the_dollar_figure);
+    RUN_TEST(test_format_caps_groups_thousands);
+    RUN_TEST(test_chart_total_sums_the_tail);
+    RUN_TEST(test_exposure_log_stays_in_the_panel);
+    RUN_TEST(test_a_provider_with_no_text_still_draws_the_log);
     RUN_TEST(test_freshness_boundaries);
     RUN_TEST(test_nothing_ever_fetched_is_no_signal);
     RUN_TEST(test_the_newest_provider_sets_the_state);

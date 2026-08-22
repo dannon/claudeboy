@@ -300,6 +300,101 @@ void draw_chart(Canvas& c, const Provider& prov) {
 }
 
 
+void format_rads(int64_t v, char* out, size_t n) {
+    if (!out || n == 0) return;
+    if (v < 0) { snprintf(out, n, "--"); return; }
+    struct Unit { int64_t div; char suffix; };
+    static const Unit kUnits[] = {{1000000000LL, 'B'}, {1000000LL, 'M'}, {1000LL, 'K'}};
+    for (const Unit& u : kUnits) {
+        if (v < u.div) continue;
+        // One decimal, by integer division: a float here would drag softfloat
+        // formatting into a build that otherwise never needs it. Rounded, not
+        // truncated, so the figure matches the one the provider prints.
+        int64_t whole = v / u.div;
+        int64_t frac  = ((v % u.div) * 10 + u.div / 2) / u.div;
+        if (frac >= 10) { whole++; frac = 0; }
+        snprintf(out, n, "%lld.%lld%c", (long long)whole, (long long)frac, u.suffix);
+        return;
+    }
+    snprintf(out, n, "%lld", (long long)v);
+}
+
+int64_t parse_caps(const char* s) {
+    if (!s) return -1;
+    while (*s && *s != '$') s++;
+    if (*s != '$') return -1;
+    s++;
+    int64_t v = 0;
+    bool any = false;
+    // Thousands separators are part of the figure; the decimal point ends it.
+    for (; *s; s++) {
+        if (*s == ',') continue;
+        if (*s < '0' || *s > '9') break;
+        v = v * 10 + (*s - '0');
+        any = true;
+        if (v > 99999999LL) break;   // nothing sane gets here; stop before it wraps
+    }
+    return any ? v : -1;
+}
+
+void format_caps(int64_t v, char* out, size_t n) {
+    if (!out || n == 0) return;
+    if (v < 0) { snprintf(out, n, "--"); return; }
+    char digits[24];
+    const int len = snprintf(digits, sizeof digits, "%lld", (long long)v);
+    size_t o = 0;
+    for (int i = 0; i < len && o + 1 < n; i++) {
+        if (i > 0 && (len - i) % 3 == 0) out[o++] = ',';
+        if (o + 1 < n) out[o++] = digits[i];
+    }
+    out[o] = '\0';
+}
+
+int64_t chart_total(const Provider& prov, int days) {
+    if (!prov.chart || prov.chart_count < days || days <= 0) return -1;
+    int64_t sum = 0;
+    for (int i = prov.chart_count - days; i < prov.chart_count; i++) sum += prov.chart[i].value;
+    return sum;
+}
+
+void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov) {
+    (void)w;
+    static const char* kRows[] = {"TODAY", "YSTRDY", "30 DAY"};
+    // Row labels are ours, not the provider's, and the RADS beside them come
+    // from the daily chart -- so that column cannot disagree with its label.
+    // CAPS is read from prov.text by position, which is the one assumption
+    // here: OpenUsage sends today, yesterday, then the thirty-day total. A
+    // text array too short for a row simply leaves that row's caps blank.
+    const int rads_r = x + 106, caps_r = x + w;
+
+    draw_text(c, rads_r - text_width("RADS", 1), y, "RADS", I_DIM, 1);
+    draw_text(c, caps_r - text_width("CAPS", 1), y, "CAPS", I_DIM, 1);
+
+    for (int i = 0; i < 3; i++) {
+        const int ry = y + 12 + i * 12;
+        draw_text(c, x, ry, kRows[i], I_DIM, 1);
+
+        int64_t tokens = -1;
+        if (i == 0) tokens = chart_total(prov, 1);
+        else if (i == 1) {
+            const int64_t two = chart_total(prov, 2);
+            const int64_t one = chart_total(prov, 1);
+            if (two >= 0 && one >= 0) tokens = two - one;
+        } else {
+            tokens = chart_total(prov, 30);
+        }
+        char rads[12];
+        format_rads(tokens, rads, sizeof rads);
+        draw_text(c, rads_r - text_width(rads, 1), ry, rads,
+                  tokens < 0 ? I_DIM : I_NORMAL, 1);
+
+        const int64_t caps = (prov.text && i < prov.text_count) ? parse_caps(prov.text[i].value) : -1;
+        char cs[16];
+        format_caps(caps, cs, sizeof cs);
+        draw_text(c, caps_r - text_width(cs, 1), ry, cs, caps < 0 ? I_DIM : I_NORMAL, 1);
+    }
+}
+
 void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v) {
     // Three 60-degree blades separated by 60-degree gaps, plus a hub. Drawn by
     // testing each pixel rather than blitting a bitmap: a hand-pixelled trefoil
@@ -348,12 +443,15 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     const Provider& prov = snap.providers[provider_index];
     draw_windows(c, prov, now_ms);
     draw_chart(c, prov);
+    c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
+    draw_exposure_log(c, LOG_X, PANEL_Y + 6, LOG_W, prov);
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
     if (f != Freshness::Fresh) dim_band(c, HERO_Y, PANEL_Y + PANEL_H - HERO_Y, I_STALE_SCALE);
 
-    const char* left = (prov.text && prov.text_count > 0) ? prov.text[0].value : "";
-    draw_footer(c, left, annotated ? note : "WORKING");
+    // The exposure log carries the day's figures now, so the footer's left
+    // half is free for something that is not another number.
+    draw_footer(c, nullptr, annotated ? note : "WORKING");
 }
 
 }  // namespace cb

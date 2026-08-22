@@ -34,6 +34,16 @@ constexpr int CHART_DAYS = 7;
 // The bottom panel: Vault Boy, the rad meter, and the exposure log share it.
 constexpr int PANEL_Y  = 153;
 constexpr int PANEL_H  = 60;
+constexpr int BOY_X    = MARGIN + 4;
+constexpr int BOY_W    = 42;
+constexpr int METER_X  = BOY_X + BOY_W + 6;
+constexpr int METER_W  = 76;
+constexpr int LOG_X    = METER_X + METER_W + 6;
+constexpr int LOG_W    = SCREEN_W - MARGIN - 4 - LOG_X;
+// Where the two right-hand columns end. Both are right-aligned, so these are
+// the pixel after the last one they may light.
+constexpr int LOG_RADS_R = LOG_X + 106;
+constexpr int LOG_CAPS_R = LOG_X + LOG_W;
 
 constexpr int FOOT_Y   = 219;   // footer text row; rule sits three above
 
@@ -100,6 +110,26 @@ void draw_strip(Canvas& c, int x, int y, int w, const ProgressLine& line, const 
 void draw_windows(Canvas& c, const Provider& prov, int64_t now_ms);
 
 void draw_chart(Canvas& c, const Provider& prov);
+
+// Tokens, abbreviated: "742", "56.3K", "98.1M", "5.3B". One decimal above a
+// thousand, never wider than six characters. A negative count is "--".
+void format_rads(int64_t tokens, char* out, size_t n);
+
+// Whole dollars from the head of an OpenUsage text value -- "$4,512.30 - 4.8B"
+// is 4512. Cents are dropped, not rounded: the panel has no room for them and
+// nobody reads a bottle-cap count to two places. -1 when there is no figure
+// there to read.
+int64_t parse_caps(const char* s);
+
+// Comma-grouped: "4,869".
+void format_caps(int64_t dollars, char* out, size_t n);
+
+// Total tokens over the last `days` entries of the chart, or -1 when the chart
+// does not go back that far.
+int64_t chart_total(const Provider& prov, int days);
+
+// TODAY / YESTERDAY / 30 DAYS as a RADS column and a CAPS column.
+void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov);
 
 // Radiation trefoil, drawn procedurally rather than as a bitmap -- at this size
 // a hand-pixelled one reads as a smudge.
