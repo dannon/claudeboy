@@ -203,14 +203,17 @@ void loop() {
         clock_text = clk;
     }
 
+    // The one figure on screen the board works out for itself, so it is the
+    // one worth having in the log when the needle looks wrong.
+    const int64_t rads = cb::burn_rate_per_hour(g_burn, now, cb::BURN_WINDOW_MS);
+
     cb::FrameTiming timing{now_us, 0, 0};
     const uint32_t t_frame_start = micros();
     tft.startWrite();
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
     cb::render_frame(c, snap, 0, now, clock_text, fx,
                      g_frame, g_ring, sizeof g_ring,
-                     g_out_row, push_row, nullptr, &timing,
-                     cb::burn_rate_per_hour(g_burn, now, cb::BURN_WINDOW_MS));
+                     g_out_row, push_row, nullptr, &timing, rads);
     tft.endWrite();
     const uint32_t total_us = micros() - t_frame_start;
 
@@ -222,9 +225,10 @@ void loop() {
         // is the most optimistic the board will ever produce, and the
         // largest-block number is what decides whether TLS fits.
         Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus %s "
-                      "free=%u largest=%u\n",
+                      "rads/h=%lld samples=%d free=%u largest=%u\n",
                       (unsigned)timing.render_us, (unsigned)timing.post_us,
                       (unsigned)total_us, cbnet::wifi_status_text(),
+                      (long long)rads, g_burn.count,
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     }
