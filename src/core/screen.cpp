@@ -1,4 +1,5 @@
 #include "core/screen.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "core/fastdiv.h"
@@ -138,9 +139,14 @@ void dim_band(Canvas& c, int y0, int h, uint8_t scale) {
 
 // Centred in the band the gauges and the chart would have filled.
 void draw_banner(Canvas& c, const char* s) {
+    // Centred over the WHOLE data region -- cells, chart and scope -- because
+    // that is the space the banner is standing in for. Deriving the bottom from
+    // the chart alone meant shrinking the chart quietly walked the banner up
+    // into the gauge cells.
+    const int data_bottom = SCOPE_Y + SCOPE_H;
     const int w = text_width(s, 2);
     draw_text(c, (SCREEN_W - w) / 2,
-              CELL_Y + (CHART_Y + CHART_H - CELL_Y - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
+              CELL_Y + (data_bottom - CELL_Y - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
 }
 
 }  // namespace
@@ -206,7 +212,14 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
             // part read at a glance.
             if (text_width(row, 1) > w - 6) snprintf(row, sizeof row, "%s", v);
         }
-        draw_text(c, x + 3, y + 48, row, verdict_intensity(p.state), 1);
+        // Burnout gets a radiation trefoil beside the words. It is the one
+        // state worth spotting from across the room without reading anything.
+        int text_x = x + 3;
+        if (p.state == PaceState::Burnout) {
+            draw_radiation(c, x + 8, y + 51, 5, I_BRIGHT);
+            text_x = x + 16;
+        }
+        draw_text(c, text_x, y + 48, row, verdict_intensity(p.state), 1);
     }
 }
 
@@ -222,34 +235,117 @@ void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms) {
 }
 
 void draw_chart(Canvas& c, const Provider& prov) {
-    const int n = prov.chart_count;
-    if (n <= 0 || !prov.chart) return;
+    if (prov.chart_count <= 0 || !prov.chart) return;
+
+    // Draw the tail of whatever was sent. The provider still ships 31 days --
+    // the wire did not change, only how much of it is worth the panel space.
+    const int total = prov.chart_count;
+    const int n = total < CHART_DAYS ? total : CHART_DAYS;
+    const ChartPoint* pts = prov.chart + (total - n);
 
     const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
     c.rect(x0, CHART_Y, w, CHART_H, I_RULE);
-    // The window is whatever the provider actually sent, not a fixed 30 days.
     char title[32];
-    snprintf(title, sizeof title, "DAILY CONSUMPTION - %dD", n);
+    snprintf(title, sizeof title, "CONSUMPTION - %dD", n);
     draw_text(c, x0 + 3, CHART_Y + 3, title, I_DIM, 1);
 
     int64_t peak = 1;
-    for (int i = 0; i < n; i++) if (prov.chart[i].value > peak) peak = prov.chart[i].value;
+    for (int i = 0; i < n; i++) if (pts[i].value > peak) peak = pts[i].value;
 
     const int plot_y = CHART_Y + 14;
     const int plot_h = CHART_H - 18;
     const int inner_w = w - 6;
-    const int gap = (n > 40) ? 0 : 1;
+    const int gap = 2;   // wide bars now that there are only seven of them
     int bw = (inner_w - (n - 1) * gap) / n;
     if (bw < 1) bw = 1;
 
     for (int i = 0; i < n; i++) {
-        int bh = static_cast<int>((prov.chart[i].value * plot_h) / peak);
-        if (bh < 1 && prov.chart[i].value > 0) bh = 1;
+        int bh = static_cast<int>((pts[i].value * plot_h) / peak);
+        if (bh < 1 && pts[i].value > 0) bh = 1;
         const int bx = x0 + 3 + i * (bw + gap);
         // The last point is today, still filling: draw it dim so it does not
         // read as a finished day.
         const uint8_t v = (i == n - 1) ? I_DIM : I_NORMAL;
         if (bh > 0) c.fill(bx, plot_y + plot_h - bh, bw, bh, v);
+    }
+}
+
+
+// 64-entry quarter-symmetric sine, 0..255 amplitude. A table rather than sinf()
+// because this runs 300+ times a frame on a chip whose FPU is not free, and
+// because a table is exactly reproducible across host and device -- the golden
+// depends on that.
+static const uint8_t kSine[65] = {
+    128,140,152,165,176,188,198,208,218,226,234,240,245,250,253,254,
+    255,254,253,250,245,240,234,226,218,208,198,188,176,165,152,140,
+    128,115,103, 90, 79, 67, 57, 47, 37, 29, 21, 15, 10,  5,  2,  1,
+      0,  1,  2,  5, 10, 15, 21, 29, 37, 47, 57, 67, 79, 90,103,115,
+    128
+};
+
+static int sine_at(uint32_t phase) { return kSine[phase & 63] - 128; }   // -128..127
+
+void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v) {
+    // Three 60-degree blades separated by 60-degree gaps, plus a hub. Drawn by
+    // testing each pixel rather than blitting a bitmap: a hand-pixelled trefoil
+    // at this size reads as a smudge, and this stays crisp at any radius.
+    //
+    // atan2f rather than an integer angle approximation. This covers about 120
+    // pixels per icon and at most one icon per cell, so the cost is nothing --
+    // and the approximation this replaces produced lopsided, unevenly spaced
+    // blades, which is worse than a smudge because it looks deliberate.
+    const int hub = r / 3 > 0 ? r / 3 : 1;
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            const int d2 = dx * dx + dy * dy;
+            if (d2 > r * r) continue;
+            if (d2 <= hub * hub) { c.plot(cx + dx, cy + dy, v); continue; }
+            if (d2 < (hub + 1) * (hub + 1) + 1) continue;    // clear ring round the hub
+            float a = atan2f(static_cast<float>(-dy), static_cast<float>(dx));
+            a = a * (180.0f / 3.14159265f) + 90.0f;          // one blade points up
+            while (a < 0.0f) a += 360.0f;
+            if (fmodf(a, 120.0f) < 60.0f) c.plot(cx + dx, cy + dy, v);
+        }
+    }
+}
+
+void draw_scope(Canvas& c, const Provider& prov, int64_t now_ms, uint32_t frame) {
+    const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
+    c.rect(x0, SCOPE_Y, w, SCOPE_H, I_RULE);
+
+    // Agitation is the worst pace ratio across this provider's windows: a calm
+    // line when nothing is being burned, a violent one when something is.
+    float worst = 0.0f;
+    for (int i = 0; i < prov.progress_count; i++) {
+        const Pace p = compute_pace(prov.progress[i], now_ms);
+        if (p.valid && p.state != PaceState::Ready && p.ratio > worst) worst = p.ratio;
+    }
+    if (worst > 2.0f) worst = 2.0f;
+
+    const int mid = SCOPE_Y + SCOPE_H / 2;
+    const int head = (SCOPE_H / 2) - 4;
+    // Half scale at ratio 1.0, full at 2.0. Scaling straight off the ratio put
+    // the trace at full deflection for perfectly ordinary usage, which left it
+    // nothing to say when something actually went wrong.
+    const int amp = 2 + static_cast<int>((worst * 0.5f) * (head - 2));
+
+    const int ix = x0 + 2, iw = w - 4;
+    int prev = mid;
+    for (int i = 0; i < iw; i++) {
+        // Two beats at different rates so it never looks like it is repeating,
+        // plus a slow drift so the whole trace breathes.
+        const uint32_t t = frame;
+        int y = mid;
+        y += (sine_at(i * 2 + t) * amp) / 256;
+        y += (sine_at(i * 5 + t * 3) * amp) / 512;
+        y += (sine_at(i + t / 2) * amp) / 640;
+        if (y < SCOPE_Y + 2) y = SCOPE_Y + 2;
+        if (y > SCOPE_Y + SCOPE_H - 3) y = SCOPE_Y + SCOPE_H - 3;
+        if (i == 0) prev = y;
+        const int top = y < prev ? y : prev;
+        const int len = (y > prev ? y : prev) - top + 1;
+        c.fill(ix + i, top, 1, len, I_NORMAL);
+        prev = y;
     }
 }
 
@@ -277,6 +373,10 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     const Provider& prov = snap.providers[provider_index];
     draw_cells(c, prov, now_ms);
     draw_chart(c, prov);
+    // Phase comes from the clock rather than a frame counter so render_ambient
+    // keeps its signature and every caller stays unchanged -- and so the golden,
+    // which renders at a fixed reference instant, stays reproducible.
+    draw_scope(c, prov, now_ms, static_cast<uint32_t>((now_ms / 50) & 0xFFFFFFFF));
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
     if (f != Freshness::Fresh) dim_band(c, CELL_Y, CHART_Y + CHART_H - CELL_Y, I_STALE_SCALE);

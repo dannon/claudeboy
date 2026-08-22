@@ -390,8 +390,11 @@ void test_no_signal_shows_no_numbers_at_all(void) {
     cb::Canvas c = mks();
     cb::render_ambient(c, with_fetched_at(0), 0, REF, "14:44");
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H));
-    // chart bars grow from the floor of the chart band
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y + cb::CHART_H - 20, cb::SCREEN_W, 20));
+    // Chart bars grow from the floor of the chart band, starting at the left
+    // margin. Sampled only across the leftmost bars: the NO SIGNAL banner is
+    // centred in the data region, which the chart band is part of, so a
+    // full-width sample would be measuring the banner rather than the bars.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y + cb::CHART_H - 12, 45, 12));
     // no footer value either -- that is a number too
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::FOOT_Y, cb::SCREEN_W, cb::FONT_H));
     // but the board says why, in the space the numbers would have filled

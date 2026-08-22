@@ -15,7 +15,14 @@ constexpr int CELL_Y   = 16;
 constexpr int CELL_H   = 60;
 constexpr int CELL_GAP = 4;
 constexpr int CHART_Y  = 82;
-constexpr int CHART_H  = 128;
+constexpr int CHART_H  = 46;    // a week, not a month -- see CHART_DAYS
+constexpr int SCOPE_Y  = 132;
+constexpr int SCOPE_H  = 80;
+
+// The provider sends 31 days; we draw the tail. A month of bars at this width
+// is a grey smear that answers no question you actually have, and it was
+// eating half the panel.
+constexpr int CHART_DAYS = 7;
 constexpr int FOOT_Y   = 219;   // footer text row; rule sits three above
 
 // Intensity levels. Pace state is carried by brightness, not colour.
@@ -70,6 +77,14 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
 void draw_cells(Canvas& c, const Provider& prov, int64_t now_ms);
 
 void draw_chart(Canvas& c, const Provider& prov);
+
+// Bottom panel: a trace whose agitation tracks how hard the budget is being
+// burned. Deterministic in `frame` so goldens and tests stay stable.
+void draw_scope(Canvas& c, const Provider& prov, int64_t now_ms, uint32_t phase);
+
+// Radiation trefoil, drawn procedurally rather than as a bitmap -- at this size
+// a hand-pixelled one reads as a smudge.
+void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v);
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
                     int64_t now_ms, const char* clock);
 
