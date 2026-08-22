@@ -145,8 +145,8 @@ void draw_banner(Canvas& c, const char* s) {
     // Deriving the bottom from any one band means resizing that band quietly
     // walks the banner into its neighbour.
     const int top = TAB_H + 1, bottom = FOOT_Y - 4;
-    const int w = text_width(s, 2);
-    draw_text(c, (SCREEN_W - w) / 2, top + (bottom - top - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
+    const int w = text_width_big(s);
+    draw_text_big(c, (SCREEN_W - w) / 2, top + (bottom - top - BIG_H) / 2, s, I_BRIGHT);
 }
 
 }  // namespace
@@ -165,10 +165,10 @@ void draw_hero(Canvas& c, int x, int y, int w, const ProgressLine& line, const P
     // space, and a border round each gauge was most of what made the old
     // screen read as a dashboard rather than as a terminal.
     const char* badge = window_badge(line.period_ms);
-    draw_text(c, x, y, badge, I_BRIGHT, 2);
-    const int label_x = x + text_width(badge, 2) + 8;
-    // Optically centred against the double-height badge beside it.
-    draw_text(c, label_x, y + (2 * FONT_H - FONT_H) / 2, line.label, I_DIM, 1);
+    draw_text_big(c, x, y, badge, I_BRIGHT);
+    const int label_x = x + text_width_big(badge) + 8;
+    // Optically centred against the big badge beside it.
+    draw_text(c, label_x, y + (BIG_H - FONT_H) / 2, line.label, I_DIM, 1);
 
     char pct[8];
     // No period or no limit means there was never a reading to take. Drawing
@@ -176,7 +176,7 @@ void draw_hero(Canvas& c, int x, int y, int w, const ProgressLine& line, const P
     // genuinely spent, so say nothing instead.
     if (p.valid) snprintf(pct, sizeof pct, "%d%%", static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
     else         snprintf(pct, sizeof pct, "--");
-    draw_text(c, x + w - text_width(pct, 2), y, pct, p.valid ? I_NORMAL : I_DIM, 2);
+    draw_text_big(c, x + w - text_width_big(pct), y, pct, p.valid ? I_NORMAL : I_DIM);
     if (!p.valid) return;
 
     // Pace tick: where remaining ought to sit if consumption were on budget.
