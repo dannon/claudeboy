@@ -11,7 +11,9 @@
 #include "core/screen.h"
 #include "core/store.h"
 #include "core/types.h"
+#include "core/view.h"
 #include "device/net.h"
+#include "device/touch.h"
 
 static TFT_eSPI tft;
 
@@ -43,6 +45,9 @@ static char g_body[6144];
 
 // No RTC, no NTP: the clock is seeded from each reply's serverTime.
 static cb::ServerClock g_clock;
+
+// Which provider and which page are on the glass. Only a tap moves it.
+static cb::ViewState g_view = cb::VIEW_INITIAL;
 
 // Today's running token total, sampled once per successful poll. This is the
 // only history the board keeps, and the only thing on screen that is measured
@@ -174,12 +179,28 @@ void setup() {
     cb::palette_build_rgb565_table(g_palette);
     cb::store_init(g_store, g_arena_a, g_arena_b);
     cb::burn_init(g_burn);
+    cbtouch::begin();
 
     // Last, and deliberately: the framebuffer already holds its contiguous run
     // and the panel is lit, so the screen has something to show while the
     // radio associates. wifi_begin() does not block -- loop() drives it.
     cbnet::wifi_begin(WIFI_TIMEOUT_MS);
     print_heap("after wifi start");
+}
+
+// One tap per call at most, taken between frames. The raw counts ride along
+// because the map from them to panel pixels is per-panel and this line is the
+// only way to check it.
+static void poll_touch(const cb::UsageSnapshot& snap) {
+    int x = 0, y = 0;
+    if (!cbtouch::tapped(x, y)) return;
+    int rx = 0, ry = 0;
+    cbtouch::last_raw(rx, ry);
+    const bool changed = cb::view_tap(g_view, x, y, snap.provider_count);
+    Serial.printf("claudeboy: tap raw=(%d,%d) panel=(%d,%d) -> provider=%d page=%s%s\n",
+                  rx, ry, x, y, g_view.provider,
+                  g_view.page == cb::Page::Data ? "DATA" : "STAT",
+                  changed ? "" : " (no change)");
 }
 
 void loop() {
@@ -190,6 +211,10 @@ void loop() {
     cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
 
     const cb::UsageSnapshot& snap = cb::store_current(g_store);
+    poll_touch(snap);
+    // The provider list is server-side: one can vanish between polls while
+    // the tap that selected it is still what the board remembers.
+    cb::view_clamp(g_view, snap.provider_count);
     const int64_t now = cb::clock_now(g_clock, millis());
     // Until the first reply lands the board does not know what time it is, and
     // a clock counting up from the epoch would be a worse answer than none.
@@ -204,16 +229,20 @@ void loop() {
     }
 
     // The one figure on screen the board works out for itself, so it is the
-    // one worth having in the log when the needle looks wrong.
-    const int64_t tok = cb::burn_rate_per_hour(g_burn, now, cb::BURN_WINDOW_MS);
+    // one worth having in the log when the needle looks wrong. The history is
+    // sampled from the first provider only, so anything else gets an honest
+    // "no reading" rather than Claude's rate under another provider's name.
+    const int64_t tok = g_view.provider == 0
+                            ? cb::burn_rate_per_hour(g_burn, now, cb::BURN_WINDOW_MS)
+                            : -1;
 
     cb::FrameTiming timing{now_us, 0, 0};
     const uint32_t t_frame_start = micros();
     tft.startWrite();
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
-    cb::render_frame(c, snap, 0, now, clock_text, fx,
+    cb::render_frame(c, snap, g_view.provider, now, clock_text, fx,
                      g_frame, g_ring, sizeof g_ring,
-                     g_out_row, push_row, nullptr, &timing, tok);
+                     g_out_row, push_row, nullptr, &timing, tok, g_view.page);
     tft.endWrite();
     const uint32_t total_us = micros() - t_frame_start;
 
@@ -224,11 +253,16 @@ void loop() {
         // as traffic starts: the one reading taken at the association instant
         // is the most optimistic the board will ever produce, and the
         // largest-block number is what decides whether TLS fits.
+        int rx = 0, ry = 0;
+        cbtouch::last_raw(rx, ry);
         Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus %s "
-                      "tok/h=%lld samples=%d free=%u largest=%u\n",
+                      "tok/h=%lld samples=%d touch=%d last=(%d,%d) view=%d/%s "
+                      "free=%u largest=%u\n",
                       (unsigned)timing.render_us, (unsigned)timing.post_us,
                       (unsigned)total_us, cbnet::wifi_status_text(),
                       (long long)tok, g_burn.count,
+                      cbtouch::down() ? 1 : 0, rx, ry, g_view.provider,
+                      g_view.page == cb::Page::Data ? "DATA" : "STAT",
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     }
