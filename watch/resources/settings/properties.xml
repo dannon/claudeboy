@@ -1,0 +1,4 @@
+<properties>
+  <property id="ApiUrl" type="string">https://claudeboy.dannonbaker.com/v1/snapshot</property>
+  <property id="ReadToken" type="string"></property>
+</properties>

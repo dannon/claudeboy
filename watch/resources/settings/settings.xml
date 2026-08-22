@@ -1,0 +1,9 @@
+<settings>
+  <setting propertyKey="@Properties.ApiUrl" title="@Strings.UrlTitle">
+    <settingConfig type="alphaNumeric" maxLength="120"/>
+  </setting>
+  <setting propertyKey="@Properties.ReadToken" title="@Strings.TokenTitle"
+           prompt="@Strings.TokenPrompt">
+    <settingConfig type="alphaNumeric" maxLength="80"/>
+  </setting>
+</settings>

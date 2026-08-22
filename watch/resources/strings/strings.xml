@@ -1,0 +1,6 @@
+<strings>
+  <string id="AppName">ClaudeBoy</string>
+  <string id="TokenTitle">API read token</string>
+  <string id="TokenPrompt">Paste the CLAUDEBOY_READ_TOKEN value</string>
+  <string id="UrlTitle">API URL</string>
+</strings>

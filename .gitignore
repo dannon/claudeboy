@@ -6,3 +6,6 @@ out/
 
 # Real device credentials. Only secrets.h.example is committed.
 src/device/secrets.h
+
+# Connect IQ build output
+watch/bin/
