@@ -262,15 +262,19 @@ BoyMood boy_mood(const Provider& prov, int64_t now_ms) {
     }
 }
 
-void draw_vault_boy(Canvas& c, int x, int y, BoyMood mood) {
+void draw_vault_boy(Canvas& c, int x, int y, BoyMood mood, int num, int den) {
     const char* const* art = kBoySteady;
     if (mood == BoyMood::Fine) art = kBoyFine;
     else if (mood == BoyMood::Fried) art = kBoyFried;
+    if (num < 1 || den < 1) return;
 
-    for (int row = 0; row < VB_H; row++) {
-        const char* s = art[row];
-        for (int col = 0; col < VB_W && s[col]; col++) {
-            const uint8_t v = intensity_of(s[col]);
+    const int h = VB_H * num / den, w = VB_W * num / den;
+    for (int row = 0; row < h; row++) {
+        const char* s = art[row * den / num];
+        for (int col = 0; col < w; col++) {
+            const int sc = col * den / num;
+            if (!s[sc]) break;
+            const uint8_t v = intensity_of(s[sc]);
             if (v) c.plot(x + col, y + row, v);
         }
     }

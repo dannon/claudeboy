@@ -68,14 +68,14 @@ void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clo
     int x = MARGIN;
     for (int i = 0; snap.providers && i < snap.provider_count; i++) {
         const char* name = snap.providers[i].display_name;
-        const int w = text_width(name, 1);
         // Inverse video would need a hole punched in a filled bar, which this
         // canvas cannot do -- plot() blends with max, so nothing can darken a
-        // pixel once lit. Bright text plus an underline reads the same on a
-        // phosphor screen and needs no special case.
-        draw_text(c, x, 3, name, i == active ? I_BRIGHT : I_DIM, 1);
-        if (i == active) c.hline(x, 3 + FONT_H + 1, w, I_BRIGHT);
-        x += w;
+        // pixel once lit. Square brackets are how a Pip-Boy marks a selection
+        // anyway, and they cost one glyph either side.
+        if (i == active) { draw_text(c, x, TAB_Y, "[", I_BRIGHT, 1); x += FONT_ADV; }
+        draw_text(c, x, TAB_Y, name, i == active ? I_BRIGHT : I_DIM, 1);
+        x += text_width(name, 1) + 1;
+        if (i == active) { draw_text(c, x, TAB_Y, "]", I_BRIGHT, 1); x += FONT_ADV; }
         // The plan tier is the only thing on screen saying which account these
         // numbers belong to, so it rides with the provider it describes. The
         // provider list is server-side and can grow, so a plan with no room
@@ -83,11 +83,11 @@ void draw_tabs(Canvas& c, const UsageSnapshot& snap, int active, const char* clo
         const char* plan = snap.providers[i].plan;
         if (i == active && plan && plan[0]) {
             const int pw = text_width(plan, 1);
-            if (x + 6 + pw < clock_x - 6) { draw_text(c, x + 6, 3, plan, I_DIM, 1); x += 6 + pw; }
+            if (x + 6 + pw < clock_x - 6) { draw_text(c, x + 6, TAB_Y, plan, I_DIM, 1); x += 6 + pw; }
         }
-        x += 12;
+        x += 9;
     }
-    if (clock) draw_text(c, clock_x, 3, clock, I_NORMAL, 1);
+    if (clock) draw_text(c, clock_x, TAB_Y, clock, I_NORMAL, 1);
     c.hline(MARGIN, TAB_H, SCREEN_W - 2 * MARGIN, I_RULE);
 }
 
@@ -140,14 +140,13 @@ void dim_band(Canvas& c, int y0, int h, uint8_t scale) {
 
 // Centred in the band the gauges and the chart would have filled.
 void draw_banner(Canvas& c, const char* s) {
-    // Centred over the WHOLE data region -- heroes, strip, chart and panel --
-    // because that is the space the banner is standing in for. Deriving the
-    // bottom from any one band means resizing that band quietly walks the
-    // banner into its neighbour.
-    const int data_bottom = PANEL_Y + PANEL_H;
+    // Centred over everything between the tab rule and the footer rule,
+    // because that is the space the banner is standing in for on either page.
+    // Deriving the bottom from any one band means resizing that band quietly
+    // walks the banner into its neighbour.
+    const int top = TAB_H + 1, bottom = FOOT_Y - 4;
     const int w = text_width(s, 2);
-    draw_text(c, (SCREEN_W - w) / 2,
-              HERO_Y + (data_bottom - HERO_Y - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
+    draw_text(c, (SCREEN_W - w) / 2, top + (bottom - top - 2 * FONT_H) / 2, s, I_BRIGHT, 2);
 }
 
 }  // namespace
@@ -158,50 +157,56 @@ const char* window_badge(int64_t period_ms) {
     return (period_ms > 0 && period_ms <= 24LL * 3600 * 1000) ? "AP" : "HP";
 }
 
-int hero_width() { return (SCREEN_W - 2 * MARGIN - HERO_GAP) / 2; }
+int hero_width() { return HERO_W; }
 
 void draw_hero(Canvas& c, int x, int y, int w, const ProgressLine& line, const Pace& p) {
-    c.rect(x, y, w, HERO_H, I_RULE);
+    // Badge at double size, window name beside it at single, percent remaining
+    // right-aligned at double. No box: the type is large enough to hold the
+    // space, and a border round each gauge was most of what made the old
+    // screen read as a dashboard rather than as a terminal.
+    const char* badge = window_badge(line.period_ms);
+    draw_text(c, x, y, badge, I_BRIGHT, 2);
+    const int label_x = x + text_width(badge, 2) + 8;
+    // Optically centred against the double-height badge beside it.
+    draw_text(c, label_x, y + (2 * FONT_H - FONT_H) / 2, line.label, I_DIM, 1);
 
-    draw_text(c, x + 5, y + 5, window_badge(line.period_ms), I_BRIGHT, 2);
-    draw_text(c, x + 5 + 2 * FONT_ADV * 2 + 4, y + 9, line.label, I_DIM, 1);
-
+    char pct[8];
     // No period or no limit means there was never a reading to take. Drawing
     // "0%" over an empty bar would be indistinguishable from a window that is
     // genuinely spent, so say nothing instead.
-    if (!p.valid) {
-        draw_text(c, x + 5, y + 22, "--", I_DIM, 3);
-        return;
-    }
-
-    char pct[8];
-    snprintf(pct, sizeof pct, "%d%%", static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
-    draw_text(c, x + 5, y + 22, pct, I_NORMAL, 3);
-
-    // Burnout gets a radiation trefoil in the corner the percent never reaches.
-    // It is the one state worth spotting without reading anything.
-    if (p.state == PaceState::Burnout) draw_radiation(c, x + w - 17, y + 32, 10, I_BRIGHT);
-
-    const int bar_x = x + 5, bar_w = w - 10;
+    if (p.valid) snprintf(pct, sizeof pct, "%d%%", static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
+    else         snprintf(pct, sizeof pct, "--");
+    draw_text(c, x + w - text_width(pct, 2), y, pct, p.valid ? I_NORMAL : I_DIM, 2);
+    if (!p.valid) return;
 
     // Pace tick: where remaining ought to sit if consumption were on budget.
     if (p.state != PaceState::Unknown && p.state != PaceState::Ready) {
         const float on_pace_remaining = 1.0f - p.elapsed_frac;
-        int tx = bar_x + static_cast<int>(on_pace_remaining * (bar_w - 1));
-        if (tx < bar_x) tx = bar_x;
-        if (tx > bar_x + bar_w - 1) tx = bar_x + bar_w - 1;
-        c.vline(tx, y + 44, 3, I_NORMAL);
+        int tx = x + static_cast<int>(on_pace_remaining * (w - 1));
+        if (tx < x) tx = x;
+        if (tx > x + w - 1) tx = x + w - 1;
+        c.vline(tx, y + HERO_TICK_DY, 4, I_NORMAL);
     }
 
     // Drain bar.
-    c.rect(bar_x, y + 47, bar_w, 9, I_RULE);
-    int fill_w = static_cast<int>(p.remaining_frac * (bar_w - 2));
+    c.rect(x, y + HERO_BAR_DY, w, HERO_BAR_H, I_RULE);
+    int fill_w = static_cast<int>(p.remaining_frac * (w - 4));
     if (fill_w < 0) fill_w = 0;
-    if (fill_w > bar_w - 2) fill_w = bar_w - 2;
-    if (fill_w > 0) c.fill(bar_x + 1, y + 48, fill_w, 7, I_NORMAL);
+    if (fill_w > w - 4) fill_w = w - 4;
+    if (fill_w > 0) c.fill(x + 2, y + HERO_BAR_DY + 2, fill_w, HERO_BAR_H - 4, I_NORMAL);
 
+    const int fy = y + HERO_FOOT_DY;
     const char* v = verdict_text(p.state);
-    if (v) draw_text(c, bar_x, y + 58, v, verdict_intensity(p.state), 1);
+    if (v) {
+        // Burnout gets a trefoil in front of the word. It is the one state
+        // worth spotting without reading anything.
+        int vx = x;
+        if (p.state == PaceState::Burnout) {
+            draw_radiation(c, x + 5, fy + 5, 5, I_BRIGHT);
+            vx = x + 14;
+        }
+        draw_text(c, vx, fy, v, verdict_intensity(p.state), 1);
+    }
 
     // The countdown rides the right edge. A window that has not started has
     // nothing to count down to, so it gets no number rather than a zero.
@@ -209,97 +214,108 @@ void draw_hero(Canvas& c, int x, int y, int w, const ProgressLine& line, const P
         char dur[12];
         format_duration(p.reset_in_ms, dur, sizeof dur);
         const int dw = text_width(dur, 1);
-        if (bar_x + (v ? text_width(v, 1) : 0) + 6 + dw <= bar_x + bar_w)
-            draw_text(c, bar_x + bar_w - dw, y + 58, dur, I_DIM, 1);
+        if ((v ? text_width(v, 1) + 20 : 0) + 6 + dw <= w)
+            draw_text(c, x + w - dw, fy, dur, I_DIM, 1);
     }
 }
 
 void draw_strip(Canvas& c, int x, int y, int w, const ProgressLine& line, const Pace& p) {
-    draw_text(c, x, y + 3, window_badge(line.period_ms), I_DIM, 1);
-    draw_text(c, x + 3 * FONT_ADV, y + 3, line.label, I_DIM, 1);
+    draw_text(c, x, y + 2, window_badge(line.period_ms), I_DIM, 1);
+    draw_text(c, x + 3 * FONT_ADV, y + 2, line.label, I_DIM, 1);
 
     char pct[8];
     if (p.valid) snprintf(pct, sizeof pct, "%d%%", static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
     else         snprintf(pct, sizeof pct, "--");
     const int pw = text_width(pct, 1);
-    draw_text(c, x + w - pw, y + 3, pct, p.valid ? I_NORMAL : I_DIM, 1);
+    draw_text(c, x + w - pw, y + 2, pct, p.valid ? I_NORMAL : I_DIM, 1);
 
     // Between the label column and the percent, whatever is left.
-    const int bar_x = x + 3 * FONT_ADV + 9 * FONT_ADV;
-    const int bar_w = (x + w - pw - 6) - bar_x;
+    const int bar_x = x + 12 * FONT_ADV;
+    const int bar_w = (x + w - pw - 8) - bar_x;
     if (bar_w < 8 || !p.valid) return;
-    c.rect(bar_x, y + 2, bar_w, 8, I_RULE);
+    c.rect(bar_x, y + 3, bar_w, 9, I_RULE);
     int fill_w = static_cast<int>(p.remaining_frac * (bar_w - 2));
     if (fill_w < 0) fill_w = 0;
     if (fill_w > bar_w - 2) fill_w = bar_w - 2;
-    if (fill_w > 0) c.fill(bar_x + 1, y + 3, fill_w, 6, I_NORMAL);
+    if (fill_w > 0) c.fill(bar_x + 1, y + 4, fill_w, 7, I_NORMAL);
 }
 
 void draw_windows(Canvas& c, const Provider& prov, int64_t now_ms) {
     const int n = prov.progress_count;
     if (n <= 0 || !prov.progress) return;
 
-    // Heroes are the first two windows in the order the provider sent them,
+    // Gauges are the first two windows in the order the provider sent them,
     // which is session then weekly. Sorting by period would put them in the
     // same order on today's data and reorder the screen the day it did not.
     const int heroes = n < 2 ? n : 2;
-    const int w = heroes == 1 ? SCREEN_W - 2 * MARGIN : hero_width();
     for (int i = 0; i < heroes; i++) {
         const Pace p = compute_pace(prov.progress[i], now_ms);
-        draw_hero(c, MARGIN + i * (w + HERO_GAP), HERO_Y, w, prov.progress[i], p);
+        draw_hero(c, HERO_X, HERO_Y + i * HERO_PITCH, HERO_W, prov.progress[i], p);
     }
 
     const int strip_w = SCREEN_W - 2 * MARGIN;
-    if (n > heroes) {
-        const Pace p = compute_pace(prov.progress[heroes], now_ms);
-        draw_strip(c, MARGIN, STRIP_Y, strip_w, prov.progress[heroes], p);
+    const int extra = n - heroes;
+    const int shown = extra < STRIP_ROWS ? extra : STRIP_ROWS;
+    for (int i = 0; i < shown; i++) {
+        const Pace p = compute_pace(prov.progress[heroes + i], now_ms);
+        draw_strip(c, MARGIN, STRIP_Y + i * STRIP_H, strip_w, prov.progress[heroes + i], p);
     }
-    // Everything past the one strip row would land on the chart. Say how many
+    // Everything past the last strip row has nowhere to go. Say how many
     // rather than pretend the provider only ever sends what fits.
-    const int hidden = n - heroes - 1;
+    const int hidden = extra - shown;
     if (hidden > 0) {
         char tag[8];
         snprintf(tag, sizeof tag, "+%d", hidden);
-        draw_text(c, MARGIN + strip_w - text_width(tag, 1), STRIP_Y + 3, tag, I_DIM, 1);
+        draw_text(c, MARGIN + strip_w - text_width(tag, 1),
+                  STRIP_Y + (STRIP_ROWS - 1) * STRIP_H + STRIP_H, tag, I_DIM, 1);
     }
 }
 
 void draw_chart(Canvas& c, const Provider& prov) {
-    if (prov.chart_count <= 0 || !prov.chart) return;
+    const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
 
     // Draw the tail of whatever was sent. The provider still ships 31 days --
     // the wire did not change, only how much of it is worth the panel space.
     const int total = prov.chart_count;
     const int n = total < CHART_DAYS ? total : CHART_DAYS;
-    const ChartPoint* pts = prov.chart + (total - n);
 
-    const int x0 = MARGIN, w = SCREEN_W - 2 * MARGIN;
-    c.rect(x0, CHART_Y, w, CHART_H, I_RULE);
     char title[32];
-    snprintf(title, sizeof title, "CONSUMPTION - %dD", n);
-    draw_text(c, x0 + 3, CHART_Y + 3, title, I_DIM, 1);
+    if (n > 0) snprintf(title, sizeof title, "CONSUMPTION - %dD", n);
+    else       snprintf(title, sizeof title, "CONSUMPTION");
+    draw_text(c, x0, CHART_Y, title, I_DIM, 1);
+    c.hline(x0, CHART_Y + FONT_H + 1, w, I_RULE);
 
+    const int plot_y = CHART_Y + FONT_H + 6;
+    const int plot_h = CHART_H - (plot_y - CHART_Y);
+
+    // Antigravity reports progress lines and no history at all, so an empty
+    // chart is a live case, not a fixture artefact. Say so where the bars
+    // would have been rather than leaving a third of the page blank.
+    if (n <= 0 || !prov.chart) {
+        static const char* kNone = "NO DAILY HISTORY";
+        draw_text(c, x0 + (w - text_width(kNone, 1)) / 2,
+                  plot_y + (plot_h - FONT_H) / 2, kNone, I_DIM, 1);
+        return;
+    }
+
+    const ChartPoint* pts = prov.chart + (total - n);
     int64_t peak = 1;
     for (int i = 0; i < n; i++) if (pts[i].value > peak) peak = pts[i].value;
 
-    const int plot_y = CHART_Y + 14;
-    const int plot_h = CHART_H - 18;
-    const int inner_w = w - 6;
-    const int gap = 2;   // wide bars now that there are only seven of them
-    int bw = (inner_w - (n - 1) * gap) / n;
+    const int gap = 4;   // wide bars now that there are only seven of them
+    int bw = (w - (n - 1) * gap) / n;
     if (bw < 1) bw = 1;
 
     for (int i = 0; i < n; i++) {
         int bh = static_cast<int>((pts[i].value * plot_h) / peak);
         if (bh < 1 && pts[i].value > 0) bh = 1;
-        const int bx = x0 + 3 + i * (bw + gap);
+        const int bx = x0 + i * (bw + gap);
         // The last point is today, still filling: draw it dim so it does not
         // read as a finished day.
         const uint8_t v = (i == n - 1) ? I_DIM : I_NORMAL;
         if (bh > 0) c.fill(bx, plot_y + plot_h - bh, bw, bh, v);
     }
 }
-
 
 void format_tok(int64_t v, char* out, size_t n) {
     if (!out || n == 0) return;
@@ -372,7 +388,7 @@ void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov) {
     draw_text(c, caps_r - text_width("CAPS", 1), y, "CAPS", I_DIM, 1);
 
     for (int i = 0; i < 3; i++) {
-        const int ry = y + 12 + i * 12;
+        const int ry = y + LOG_ROW_H + i * LOG_ROW_H;
         draw_text(c, x, ry, kRows[i], I_DIM, 1);
 
         int64_t tokens = -1;
@@ -512,8 +528,27 @@ void draw_tok_meter(Canvas& c, int x, int y, int w, int64_t tok_per_hour) {
               tok_per_hour < 0 ? I_DIM : I_NORMAL, 1);
 }
 
+namespace {
+
+void draw_stat_page(Canvas& c, const Provider& prov, int64_t now_ms) {
+    // Bottom-anchored against the strip rows below him: he is a figure
+    // standing behind the panel edge, and a figure floating in the middle of
+    // a box reads as a sticker.
+    draw_vault_boy(c, BOY_X, BOY_Y, boy_mood(prov, now_ms), BOY_NUM, BOY_DEN);
+    draw_windows(c, prov, now_ms);
+}
+
+void draw_data_page(Canvas& c, const Provider& prov, int64_t tok_per_hour) {
+    draw_chart(c, prov);
+    draw_exposure_log(c, LOG_X, LOG_Y, LOG_W, prov);
+    draw_tok_meter(c, METER_X, METER_Y, METER_W, tok_per_hour);
+}
+
+}  // namespace
+
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock, int64_t tok_per_hour) {
+                    int64_t now_ms, const char* clock, int64_t tok_per_hour,
+                    Page page) {
     draw_tabs(c, snap, provider_index, clock);
 
     const Freshness f = freshness_of(snap, now_ms);
@@ -534,22 +569,24 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     if (!snap.providers || provider_index < 0 || provider_index >= snap.provider_count) return;
 
     const Provider& prov = snap.providers[provider_index];
-    draw_windows(c, prov, now_ms);
-    draw_chart(c, prov);
-    c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
-    draw_exposure_log(c, LOG_X, LOG_Y, LOG_W, prov);
-    draw_tok_meter(c, METER_X, METER_Y, METER_W, tok_per_hour);
-    // Bottom-anchored: he is a figure standing behind the panel edge, and a
-    // figure floating in the middle of a box reads as a sticker.
-    draw_vault_boy(c, BOY_X, PANEL_Y + PANEL_H - VB_H - 1, boy_mood(prov, now_ms));
+    if (page == Page::Data) draw_data_page(c, prov, tok_per_hour);
+    else                    draw_stat_page(c, prov, now_ms);
+
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
-    if (f != Freshness::Fresh) dim_band(c, HERO_Y, PANEL_Y + PANEL_H - HERO_Y, I_STALE_SCALE);
+    if (f != Freshness::Fresh) dim_band(c, TAB_H + 1, FOOT_Y - 4 - TAB_H - 1, I_STALE_SCALE);
 
-    // The exposure log carries the day's figures now, so the footer's left
-    // half says what the terminal makes of them.
+    // The pages carry the figures; the footer's left half says what the
+    // terminal makes of them. On the right, the day's token count when there
+    // is nothing wrong to report -- the one number worth carrying on both
+    // pages, and the reason the unit is called TOK at all.
+    char tok[12] = "WORKING";
+    if (!annotated) {
+        const int64_t today = chart_total(prov, 1);
+        if (today >= 0) format_tok(today, tok, sizeof tok);
+    }
     const PaceState worst = worst_pace(prov, now_ms);
-    draw_footer(c, vault_caption(f, worst), annotated ? note : "WORKING",
+    draw_footer(c, vault_caption(f, worst), annotated ? note : tok,
                 worst == PaceState::Burnout && f == Freshness::Fresh ? I_BRIGHT : I_DIM);
 }
 

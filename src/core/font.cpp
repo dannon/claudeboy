@@ -6,11 +6,14 @@ namespace cb {
 void draw_char(Canvas& c, int x, int y, char ch, uint8_t v, int scale) {
     if (scale < 1) return;
     if (ch < FONT_FIRST || ch > FONT_LAST) return;
-    const uint8_t* g = &FONT_DATA[(ch - FONT_FIRST) * FONT_W];
-    for (int col = 0; col < FONT_W; col++) {
-        const uint8_t bits = g[col];
-        for (int row = 0; row < FONT_H; row++) {
-            if (!(bits & (1u << row))) continue;
+    // Row-major, one byte per row, bit 0 = leftmost. A byte per column would
+    // be the tidier loop but caps the cell at eight rows.
+    const uint8_t* g = &FONT_DATA[(ch - FONT_FIRST) * FONT_H];
+    for (int row = 0; row < FONT_H; row++) {
+        const uint8_t bits = g[row];
+        if (!bits) continue;
+        for (int col = 0; col < FONT_W; col++) {
+            if (!(bits & (1u << col))) continue;
             if (scale == 1) {
                 c.plot(x + col, y + row, v);
             } else {

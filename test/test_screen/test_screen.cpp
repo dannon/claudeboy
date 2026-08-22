@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <initializer_list>
 #include <string.h>
 #include "core/screen.h"
 #include "core/canvas.h"
@@ -25,9 +26,9 @@ static const int64_t REF  = cb::FIXTURE_REFERENCE_MS;
 static const int64_t MIN  = 60LL * 1000;
 static const int64_t HOUR = 60 * MIN;
 
-// The band the numbers live in: hero cards through the bottom of the panel.
-static const int DATA_Y = cb::HERO_Y;
-static const int DATA_H = cb::PANEL_Y + cb::PANEL_H - cb::HERO_Y;
+// The band the numbers live in on either page: between the two rules.
+static const int DATA_Y = cb::TAB_H + 1;
+static const int DATA_H = cb::FOOT_Y - 4 - DATA_Y;
 
 // The fixture provider with its fetch timestamp moved. Static, because the
 // snapshot handed back only points at it.
@@ -70,14 +71,31 @@ void test_format_clock_renders_hh_mm(void) {
     cb::format_clock(86400LL * 1000, b, sizeof b); TEST_ASSERT_EQUAL_STRING("00:00", b);
 }
 
-void test_layout_fits_the_panel(void) {
+void test_the_stat_page_fits_the_panel(void) {
     // Every band clears the next, top to bottom, with nothing overlapping.
     TEST_ASSERT_TRUE(cb::TAB_H < cb::HERO_Y);
-    TEST_ASSERT_TRUE(cb::HERO_Y + cb::HERO_H < cb::STRIP_Y);
-    TEST_ASSERT_TRUE(cb::STRIP_Y + cb::STRIP_H < cb::CHART_Y);
-    TEST_ASSERT_TRUE(cb::CHART_Y + cb::CHART_H < cb::PANEL_Y);
-    TEST_ASSERT_TRUE(cb::PANEL_Y + cb::PANEL_H < cb::FOOT_Y - 4);
+    TEST_ASSERT_TRUE(cb::TAB_H < cb::BOY_Y);
+    // The two gauges are stacked, so the pitch has to clear one whole gauge.
+    TEST_ASSERT_TRUE(cb::HERO_H < cb::HERO_PITCH);
+    TEST_ASSERT_TRUE(cb::HERO_Y + cb::HERO_PITCH + cb::HERO_H <= cb::STRIP_Y);
+    // Vault Boy stands to their left and must not reach across or below.
+    TEST_ASSERT_TRUE(cb::BOY_X + cb::BOY_W < cb::HERO_X);
+    TEST_ASSERT_TRUE(cb::BOY_Y + cb::BOY_H <= cb::STRIP_Y);
+    // Strip rows, then the row the "+N" tag lands on, then the footer rule.
+    TEST_ASSERT_TRUE(cb::STRIP_Y + (cb::STRIP_ROWS + 1) * cb::STRIP_H < cb::FOOT_Y - 4);
     TEST_ASSERT_TRUE(cb::FOOT_Y + cb::FONT_H < cb::SCREEN_H);
+    TEST_ASSERT_TRUE(cb::HERO_X + cb::HERO_W <= cb::SCREEN_W - cb::MARGIN);
+}
+
+void test_the_data_page_fits_the_panel(void) {
+    TEST_ASSERT_TRUE(cb::TAB_H < cb::CHART_Y);
+    TEST_ASSERT_TRUE(cb::CHART_Y + cb::CHART_H < cb::PANEL_Y);
+    TEST_ASSERT_TRUE(cb::PANEL_Y + cb::PANEL_H <= cb::FOOT_Y - 4);
+    // Log on the left, meter on the right, neither reaching the other.
+    TEST_ASSERT_TRUE(cb::LOG_X + cb::LOG_W < cb::METER_X);
+    TEST_ASSERT_TRUE(cb::METER_X + cb::METER_W <= cb::SCREEN_W - cb::MARGIN);
+    // Three log rows and their header all sit inside the band.
+    TEST_ASSERT_TRUE(cb::LOG_Y + 4 * cb::LOG_ROW_H <= cb::PANEL_Y + cb::PANEL_H);
 }
 
 void test_window_badge_splits_on_a_day(void) {
@@ -111,25 +129,33 @@ void test_format_duration_clamps_absurd_values(void) {
     TEST_ASSERT_TRUE(strlen(b) <= 7);
 }
 
-void test_hero_width_fits_two_side_by_side(void) {
+void test_hero_width_is_the_column_beside_vault_boy(void) {
     const int w = cb::hero_width();
     TEST_ASSERT_TRUE(w > 0);
-    TEST_ASSERT_TRUE(2 * w + cb::HERO_GAP <= cb::SCREEN_W - 2 * cb::MARGIN);
+    TEST_ASSERT_EQUAL_INT(cb::HERO_W, w);
+    TEST_ASSERT_TRUE(cb::HERO_X + w <= cb::SCREEN_W - cb::MARGIN);
 }
 
 void test_windows_draw_inside_their_bands(void) {
     cb::Canvas c = mks();
     const cb::Provider& p = cb::fixture_snapshot().providers[0];
     cb::draw_windows(c, p, cb::FIXTURE_REFERENCE_MS);
-    TEST_ASSERT_TRUE(lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H) > 200);
-    // The fixture's third window lands on the strip row.
+    // Both gauges, stacked, each in its own slot.
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X, cb::HERO_Y, cb::HERO_W, cb::HERO_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_PITCH,
+                            cb::HERO_W, cb::HERO_H) > 200);
+    // The fixture's third window lands on the first strip row.
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::STRIP_Y, cb::SCREEN_W, cb::STRIP_H) > 40);
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::SCREEN_W, cb::HERO_Y - 1));
-    // Nothing spills into the gutter between the bands, or onto the chart.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y + cb::HERO_H, cb::SCREEN_W,
-                                    cb::STRIP_Y - cb::HERO_Y - cb::HERO_H));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::STRIP_Y + cb::STRIP_H, cb::SCREEN_W,
-                                    cb::CHART_Y - cb::STRIP_Y - cb::STRIP_H));
+    // Nothing spills into the gutter between the gauges, into Vault Boy's
+    // column, or past the last strip row.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_H, cb::HERO_W,
+                                    cb::HERO_PITCH - cb::HERO_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y, cb::HERO_X,
+                                    cb::STRIP_Y - cb::HERO_Y));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::STRIP_Y + cb::STRIP_ROWS * cb::STRIP_H,
+                                    cb::SCREEN_W, cb::FOOT_Y - 4 -
+                                    (cb::STRIP_Y + cb::STRIP_ROWS * cb::STRIP_H)));
 }
 
 void test_a_window_that_does_not_fit_is_counted_not_dropped(void) {
@@ -143,14 +169,16 @@ void test_a_window_that_does_not_fit_is_counted_not_dropped(void) {
     };
     cb::Provider prov{"x", "X", "", REF, five, 5, nullptr, 0, nullptr, 0};
     cb::draw_windows(c, prov, REF);
-    // Two heroes and one strip is all the layout holds; the two that did not
-    // fit are announced as "+2" at the right of the strip row rather than
-    // silently vanishing.
-    const int tag_w = cb::text_width("+2", 1);
-    TEST_ASSERT_TRUE(lit_in(c, cb::SCREEN_W - cb::MARGIN - tag_w, cb::STRIP_Y,
-                            tag_w, cb::STRIP_H) > 4);
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::STRIP_Y + cb::STRIP_H, cb::SCREEN_W,
-                                    cb::CHART_Y - cb::STRIP_Y - cb::STRIP_H));
+    // Two gauges and two strips is all the layout holds; the one that did not
+    // fit is announced as "+1" under the strips rather than silently
+    // vanishing.
+    const int tag_w = cb::text_width("+1", 1);
+    const int tag_y = cb::STRIP_Y + cb::STRIP_ROWS * cb::STRIP_H;
+    TEST_ASSERT_TRUE(lit_in(c, cb::SCREEN_W - cb::MARGIN - tag_w, tag_y,
+                            tag_w, cb::FONT_H) > 4);
+    // and it is the only thing down there
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, tag_y, cb::SCREEN_W - cb::MARGIN - tag_w,
+                                    cb::FONT_H));
 }
 
 void test_unknown_state_draws_no_verdict(void) {
@@ -160,26 +188,28 @@ void test_unknown_state_draws_no_verdict(void) {
                            5LL * 3600 * 1000};
     cb::Pace pc = cb::compute_pace(fresh, cb::FIXTURE_REFERENCE_MS);
     TEST_ASSERT_EQUAL(cb::PaceState::Unknown, pc.state);
-    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, cb::hero_width(), fresh, pc);
+    cb::draw_hero(c, cb::HERO_X, cb::HERO_Y, cb::HERO_W, fresh, pc);
     // No verdict word, because we have no verdict to give. The countdown is
     // a separate fact and still true, so it keeps its place on the right.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + 5, cb::HERO_Y + 58,
+    const int fy = cb::HERO_Y + cb::HERO_FOOT_DY;
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::HERO_X, fy,
                                     cb::text_width("SURPLUS", 1), cb::FONT_H));
-    TEST_ASSERT_TRUE(lit_in(c, cb::MARGIN + cb::hero_width() / 2, cb::HERO_Y + 58,
-                            cb::hero_width() / 2 - 5, cb::FONT_H) > 4);
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X + cb::HERO_W / 2, fy,
+                            cb::HERO_W / 2, cb::FONT_H) > 4);
 }
 
 void test_gauge_bar_length_tracks_remaining(void) {
     const int w = cb::hero_width();
+    const int fill_y = cb::HERO_Y + cb::HERO_BAR_DY + 2, fill_h = cb::HERO_BAR_H - 4;
     cb::Canvas full = mks();
     cb::ProgressLine a{"A", 0, 100, REF + 3600000, 7200000};
-    cb::draw_hero(full, cb::MARGIN, cb::HERO_Y, w, a, cb::compute_pace(a, REF));
-    const int wide = lit_in(full, cb::MARGIN, cb::HERO_Y + 48, w, 7);
+    cb::draw_hero(full, cb::HERO_X, cb::HERO_Y, w, a, cb::compute_pace(a, REF));
+    const int wide = lit_in(full, cb::HERO_X, fill_y, w, fill_h);
 
     cb::Canvas low = mks();
     cb::ProgressLine b{"B", 90, 100, REF + 3600000, 7200000};
-    cb::draw_hero(low, cb::MARGIN, cb::HERO_Y, w, b, cb::compute_pace(b, REF));
-    const int narrow = lit_in(low, cb::MARGIN, cb::HERO_Y + 48, w, 7);
+    cb::draw_hero(low, cb::HERO_X, cb::HERO_Y, w, b, cb::compute_pace(b, REF));
+    const int narrow = lit_in(low, cb::HERO_X, fill_y, w, fill_h);
 
     TEST_ASSERT_TRUE(wide > narrow);
 }
@@ -189,12 +219,12 @@ void test_strip_bar_length_tracks_remaining(void) {
     cb::Canvas full = mks();
     cb::ProgressLine a{"A", 0, 100, REF + 3600000, 7200000};
     cb::draw_strip(full, cb::MARGIN, cb::STRIP_Y, w, a, cb::compute_pace(a, REF));
-    const int wide = lit_in(full, cb::MARGIN, cb::STRIP_Y + 3, w, 6);
+    const int wide = lit_in(full, cb::MARGIN, cb::STRIP_Y + 4, w, 7);
 
     cb::Canvas low = mks();
     cb::ProgressLine b{"B", 90, 100, REF + 3600000, 7200000};
     cb::draw_strip(low, cb::MARGIN, cb::STRIP_Y, w, b, cb::compute_pace(b, REF));
-    const int narrow = lit_in(low, cb::MARGIN, cb::STRIP_Y + 3, w, 6);
+    const int narrow = lit_in(low, cb::MARGIN, cb::STRIP_Y + 4, w, 7);
 
     TEST_ASSERT_TRUE(wide > narrow);
     // Both still say which window they are and what percent is left.
@@ -222,27 +252,74 @@ void test_tallest_bar_is_the_peak_day(void) {
     TEST_ASSERT_EQUAL_INT64(527342458LL, p.chart[peak_idx].value);
 }
 
-void test_empty_chart_does_not_crash(void) {
+void test_an_empty_chart_says_so_rather_than_going_blank(void) {
+    // Antigravity reports progress lines and no daily history at all, so this
+    // is a live provider, not a fixture artefact.
     cb::Canvas c = mks();
     cb::Provider empty{"x", "X", "", 0, nullptr, 0, nullptr, 0, nullptr, 0};
     cb::draw_chart(c, empty);
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H));
+    // A heading and a line of explanation, and no bars along the floor.
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN, cb::CHART_Y + cb::CHART_H - 8,
+                                    cb::SCREEN_W - 2 * cb::MARGIN, 8));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CHART_Y + cb::CHART_H + 2, cb::SCREEN_W, 5));
 }
 
-void test_render_ambient_fills_all_bands(void) {
+void test_the_stat_page_fills_its_bands(void) {
     cb::Canvas c = mks();
-    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
+    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44",
+                       -1, cb::Page::Stat);
     TEST_ASSERT_TRUE(lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H) > 20);
-    TEST_ASSERT_TRUE(lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, cb::BOY_X, cb::BOY_Y, cb::BOY_W, cb::BOY_H) > 1000);
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X, cb::HERO_Y, cb::HERO_W, cb::HERO_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_PITCH,
+                            cb::HERO_W, cb::HERO_H) > 200);
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::STRIP_Y, cb::SCREEN_W, cb::STRIP_H) > 40);
-    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 12) > 20);
 }
 
-void test_render_ambient_with_bad_index_is_safe(void) {
+void test_the_data_page_fills_its_bands(void) {
     cb::Canvas c = mks();
-    cb::render_ambient(c, cb::fixture_snapshot(), 99, cb::FIXTURE_REFERENCE_MS, "14:44");
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H));
+    cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44",
+                       -1, cb::Page::Data);
+    TEST_ASSERT_TRUE(lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H) > 20);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
+    TEST_ASSERT_TRUE(lit_in(c, cb::LOG_X, cb::LOG_Y, cb::LOG_W, 4 * cb::LOG_ROW_H) > 100);
+    TEST_ASSERT_TRUE(lit_in(c, cb::METER_X, cb::METER_Y, cb::METER_W, 60) > 100);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 12) > 20);
+}
+
+void test_the_two_pages_are_different_screens(void) {
+    // Both pages fill the same band, so no region is empty on one and full on
+    // the other. What matters is that a tap changes the screen rather than
+    // nudging it, so compare the frames themselves.
+    static uint8_t stat[cb::SCREEN_W * cb::SCREEN_H];
+    cb::Canvas c = mks();
+    cb::render_ambient(c, cb::fixture_snapshot(), 0, REF, "14:44", -1, cb::Page::Stat);
+    memcpy(stat, sbuf, sizeof stat);
+
+    cb::Canvas d = mks();
+    cb::render_ambient(d, cb::fixture_snapshot(), 0, REF, "14:44", -1, cb::Page::Data);
+
+    int differ = 0;
+    for (int y = DATA_Y; y < DATA_Y + DATA_H; y++)
+        for (int x = 0; x < cb::SCREEN_W; x++)
+            if (stat[y * cb::SCREEN_W + x] != sbuf[y * cb::SCREEN_W + x]) differ++;
+    TEST_ASSERT_TRUE(differ > cb::SCREEN_W * DATA_H / 10);
+
+    // The chrome does not move with the page.
+    for (int y = 0; y < cb::TAB_H; y++)
+        for (int x = 0; x < cb::SCREEN_W; x++)
+            TEST_ASSERT_EQUAL_UINT8(stat[y * cb::SCREEN_W + x], sbuf[y * cb::SCREEN_W + x]);
+}
+
+void test_render_ambient_with_bad_index_is_safe(void) {
+    for (cb::Page page : {cb::Page::Stat, cb::Page::Data}) {
+        cb::Canvas c = mks();
+        cb::render_ambient(c, cb::fixture_snapshot(), 99, cb::FIXTURE_REFERENCE_MS,
+                           "14:44", -1, page);
+        TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, DATA_Y, cb::SCREEN_W, DATA_H));
+    }
 }
 
 void test_verdict_and_countdown_stay_inside_the_hero(void) {
@@ -254,38 +331,40 @@ void test_verdict_and_countdown_stay_inside_the_hero(void) {
                           REF + 8636400000LL, 200LL * 86400 * 1000};
     cb::Pace p = cb::compute_pace(line, REF);
     TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
-    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, w, line, p);
-    // Nothing bleeds past the right border into the card next to it.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + w, cb::HERO_Y, cb::HERO_GAP, cb::HERO_H));
-    // The trefoil is there.
-    TEST_ASSERT_TRUE(lit_in(c, cb::MARGIN + w - 27, cb::HERO_Y + 22, 21, 21) > 40);
+    cb::draw_hero(c, cb::HERO_X, cb::HERO_Y, w, line, p);
+    // Nothing bleeds past the right margin, or below the gauge into the next.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::HERO_X + w, cb::HERO_Y,
+                                    cb::SCREEN_W - cb::HERO_X - w, cb::HERO_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_H,
+                                    w, cb::HERO_PITCH - cb::HERO_H));
+    // The trefoil is there, in front of the verdict word.
+    TEST_ASSERT_TRUE(lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_FOOT_DY, 12, 12) > 30);
 }
 
 void test_invalid_pace_draws_no_gauge(void) {
-    const int w = cb::hero_width(), bar_x = cb::MARGIN + 5, bar_w = w - 10;
+    const int w = cb::hero_width(), x = cb::HERO_X;
     // limit 0: nothing to be a percentage of.
     cb::ProgressLine broken{"WEEKLY", 12, 0, REF + 3600000, 7200000};
     cb::Pace p = cb::compute_pace(broken, REF);
     TEST_ASSERT_FALSE(p.valid);
 
     cb::Canvas c = mks();
-    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, w, broken, p);
+    cb::draw_hero(c, x, cb::HERO_Y, w, broken, p);
     // An empty drain bar would read as a fully exhausted window, so there is
     // no bar, no pace tick and no verdict.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 44, bar_w, 3));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 47, bar_w, 9));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 58, bar_w, cb::FONT_H));
-    // The card still says which line it is, and shows a placeholder reading.
-    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::HERO_Y + 5, bar_w, 2 * cb::FONT_H) > 10);
-    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::HERO_Y + 22, bar_w, 3 * cb::FONT_H) > 4);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, x, cb::HERO_Y + cb::HERO_TICK_DY, w, 4));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, x, cb::HERO_Y + cb::HERO_BAR_DY, w, cb::HERO_BAR_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, x, cb::HERO_Y + cb::HERO_FOOT_DY, w, cb::FONT_H));
+    // The gauge still says which line it is, and shows a placeholder reading.
+    TEST_ASSERT_TRUE(lit_in(c, x, cb::HERO_Y, w, 2 * cb::FONT_H) > 14);
 
     // Same for a line with no period at all.
     cb::ProgressLine no_period{"WEEKLY", 12, 100, REF + 3600000, 0};
     cb::Pace q = cb::compute_pace(no_period, REF);
     TEST_ASSERT_FALSE(q.valid);
     cb::Canvas d = mks();
-    cb::draw_hero(d, cb::MARGIN, cb::HERO_Y, w, no_period, q);
-    TEST_ASSERT_EQUAL_INT(0, lit_in(d, bar_x, cb::HERO_Y + 47, bar_w, 9));
+    cb::draw_hero(d, x, cb::HERO_Y, w, no_period, q);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(d, x, cb::HERO_Y + cb::HERO_BAR_DY, w, cb::HERO_BAR_H));
     // A strip with nothing to plot draws no bar either.
     cb::Canvas e = mks();
     cb::draw_strip(e, cb::MARGIN, cb::STRIP_Y, cb::SCREEN_W - 2 * cb::MARGIN, no_period, q);
@@ -300,10 +379,10 @@ void test_unknown_state_draws_no_tick(void) {
                            5LL * 3600 * 1000};
     cb::Pace pc = cb::compute_pace(fresh, cb::FIXTURE_REFERENCE_MS);
     TEST_ASSERT_EQUAL(cb::PaceState::Unknown, pc.state);
-    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, cb::hero_width(), fresh, pc);
+    cb::draw_hero(c, cb::HERO_X, cb::HERO_Y, cb::hero_width(), fresh, pc);
     // Pace tick stays undrawn when there's no pace to show.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + 5, cb::HERO_Y + 44,
-                                    cb::hero_width() - 10, 3));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::HERO_X, cb::HERO_Y + cb::HERO_TICK_DY,
+                                    cb::hero_width(), 4));
 }
 
 // --- exposure log -----------------------------------------------------------
@@ -783,11 +862,12 @@ int main(int, char**) {
     RUN_TEST(test_format_duration_zero_and_negative);
     RUN_TEST(test_format_duration_clamps_absurd_values);
     RUN_TEST(test_format_clock_renders_hh_mm);
-    RUN_TEST(test_layout_fits_the_panel);
+    RUN_TEST(test_the_stat_page_fits_the_panel);
+    RUN_TEST(test_the_data_page_fits_the_panel);
     RUN_TEST(test_tabs_draw_in_the_strip_only);
     RUN_TEST(test_footer_draws_at_the_bottom);
     RUN_TEST(test_window_badge_splits_on_a_day);
-    RUN_TEST(test_hero_width_fits_two_side_by_side);
+    RUN_TEST(test_hero_width_is_the_column_beside_vault_boy);
     RUN_TEST(test_windows_draw_inside_their_bands);
     RUN_TEST(test_a_window_that_does_not_fit_is_counted_not_dropped);
     RUN_TEST(test_unknown_state_draws_no_verdict);
@@ -795,8 +875,10 @@ int main(int, char**) {
     RUN_TEST(test_strip_bar_length_tracks_remaining);
     RUN_TEST(test_chart_draws_in_its_band);
     RUN_TEST(test_tallest_bar_is_the_peak_day);
-    RUN_TEST(test_empty_chart_does_not_crash);
-    RUN_TEST(test_render_ambient_fills_all_bands);
+    RUN_TEST(test_an_empty_chart_says_so_rather_than_going_blank);
+    RUN_TEST(test_the_stat_page_fills_its_bands);
+    RUN_TEST(test_the_data_page_fills_its_bands);
+    RUN_TEST(test_the_two_pages_are_different_screens);
     RUN_TEST(test_render_ambient_with_bad_index_is_safe);
     RUN_TEST(test_verdict_and_countdown_stay_inside_the_hero);
     RUN_TEST(test_invalid_pace_draws_no_gauge);

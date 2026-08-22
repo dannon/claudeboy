@@ -24,36 +24,51 @@ static uint8_t g_ring[9 * cb::SCREEN_W];
 //
 // Frame 0 from a cleared accumulator, which is what every still image here
 // wants. render_frame() owns the decay/draw/copy/post-process order.
-static void render_reference(cb::Canvas& out, const cb::EffectParams& fx) {
+static void render_reference(cb::Canvas& out, const cb::EffectParams& fx,
+                             cb::Page page = cb::Page::Stat) {
     memset(g_accum, 0, sizeof g_accum);
     cb::Canvas accum(g_accum, cb::SCREEN_W, cb::SCREEN_H);
     cb::render_frame(accum, out, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS,
-                     "14:44", fx, 0, g_ring, sizeof g_ring);
+                     "14:44", fx, 0, g_ring, sizeof g_ring, nullptr, -1, page);
 }
 
+// Both pages, because a change to one is usually a change to the other's
+// spacing too and half a look is how the last layout regression shipped.
 static int run_png() {
     cb::Canvas c(g_shown, cb::SCREEN_W, cb::SCREEN_H);
-    render_reference(c, cb::EffectParams::defaults());
-    if (!cbhost::write_png_from_canvas("out/ambient.png", c)) {
-        fprintf(stderr, "write failed -- does out/ exist?\n");
-        return 1;
+    struct Shot { cb::Page page; const char* path; };
+    static const Shot kShots[] = {{cb::Page::Stat, "out/ambient.png"},
+                                  {cb::Page::Data, "out/ambient-data.png"}};
+    for (const Shot& s : kShots) {
+        render_reference(c, cb::EffectParams::defaults(), s.page);
+        if (!cbhost::write_png_from_canvas(s.path, c)) {
+            fprintf(stderr, "write failed -- does out/ exist?\n");
+            return 1;
+        }
+        printf("wrote %s\n", s.path);
     }
-    printf("wrote out/ambient.png\n");
     return 0;
 }
 
-// Regenerates goldens/ambient-claude.raw (and a .png to eyeball it with).
-// Run this deliberately, after a look at the result: the golden test treats
-// whatever is in that file as the truth.
+// Regenerates both goldens (and a .png each to eyeball them with). Run this
+// deliberately, after a look at the result: the golden test treats whatever is
+// in those files as the truth.
 static int run_bless() {
     cb::Canvas c(g_shown, cb::SCREEN_W, cb::SCREEN_H);
-    render_reference(c, cb::EffectParams::defaults());
-    FILE* f = fopen("goldens/ambient-claude.raw", "wb");
-    if (!f) { fprintf(stderr, "cannot write goldens/ -- does it exist?\n"); return 1; }
-    fwrite(c.data(), 1, static_cast<size_t>(cb::SCREEN_W) * cb::SCREEN_H, f);
-    fclose(f);
-    cbhost::write_png_from_canvas("goldens/ambient-claude.png", c);
-    printf("blessed goldens/ambient-claude.raw\n");
+    struct Shot { cb::Page page; const char* raw; const char* png; };
+    static const Shot kShots[] = {
+        {cb::Page::Stat, "goldens/ambient-claude.raw", "goldens/ambient-claude.png"},
+        {cb::Page::Data, "goldens/ambient-data.raw",   "goldens/ambient-data.png"},
+    };
+    for (const Shot& s : kShots) {
+        render_reference(c, cb::EffectParams::defaults(), s.page);
+        FILE* f = fopen(s.raw, "wb");
+        if (!f) { fprintf(stderr, "cannot write goldens/ -- does it exist?\n"); return 1; }
+        fwrite(c.data(), 1, static_cast<size_t>(cb::SCREEN_W) * cb::SCREEN_H, f);
+        fclose(f);
+        cbhost::write_png_from_canvas(s.png, c);
+        printf("blessed %s\n", s.raw);
+    }
     return 0;
 }
 

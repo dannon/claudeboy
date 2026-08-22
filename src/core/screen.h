@@ -4,53 +4,79 @@
 #include "core/font.h"
 #include "core/pace.h"
 #include "core/types.h"
+#include "core/vaultboy.h"
 
 namespace cb {
 
-// Layout, in panel pixels. The session block and the weekly ration are the
-// two numbers worth reading from across the room, so they get half the panel
-// each and everything else is demoted to a strip.
-constexpr int MARGIN   = 6;
-constexpr int TAB_H    = 12;    // tab text band; the rule sits on this row
+// Two pages, swapped by a tap. One screen carrying everything at once was
+// legible but read as a dashboard; a Pip-Boy is sparse, and the numbers worth
+// reading from the sofa are not the numbers worth reading up close.
+enum class Page : uint8_t { Stat, Data };
+constexpr int PAGE_COUNT = 2;
 
-constexpr int HERO_Y   = 16;
-constexpr int HERO_H   = 68;
-constexpr int HERO_GAP = 6;
+// --- chrome, on both pages --------------------------------------------------
+constexpr int MARGIN = 6;
+constexpr int TAB_Y  = 3;
+constexpr int TAB_H  = 18;    // the rule row; tab text sits at TAB_Y
+constexpr int FOOT_Y = 212;   // footer text row; its rule sits four above
 
-// One row for whatever windows did not make hero. The band holds exactly one:
-// the provider ships three windows today, and a fixed layout is worth more
-// than room for a fourth that does not exist. A window that will not fit is
-// counted in a "+N" tag rather than dropped in silence.
-constexpr int STRIP_Y  = 88;
-constexpr int STRIP_H  = 13;
+// --- STAT ------------------------------------------------------------------
+// Vault Boy is the hero here, not a thumbnail in a corner. Three pixels per
+// bead rather than two: see draw_vault_boy() for why that costs no new art.
+constexpr int BOY_NUM = 3, BOY_DEN = 2;
+constexpr int BOY_W = VB_W * BOY_NUM / BOY_DEN;   // 126
+constexpr int BOY_H = VB_H * BOY_NUM / BOY_DEN;   // 105
+constexpr int BOY_X = MARGIN;
+constexpr int BOY_Y = 34;
 
-constexpr int CHART_Y  = 105;
-constexpr int CHART_H  = 36;
+// The session block and the weekly ration, stacked down the right. These are
+// the two figures the whole device exists to show, so they get the big type.
+constexpr int HERO_X     = 148;
+constexpr int HERO_W     = SCREEN_W - MARGIN - HERO_X;
+constexpr int HERO_Y     = 26;
+constexpr int HERO_PITCH = 66;   // top of the second gauge, from the first
+constexpr int HERO_H     = 55;   // badge row through the verdict row
+
+// Inside one gauge, measured from its own top.
+constexpr int HERO_BAR_DY  = 26;
+constexpr int HERO_BAR_H   = 13;
+constexpr int HERO_TICK_DY = 21;   // pace tick, just above the bar
+constexpr int HERO_FOOT_DY = 43;   // verdict on the left, countdown on the right
+
+// Windows past the first two get one compact row each, under Vault Boy and
+// across the full width. Antigravity sends four, so two rows is not a
+// hypothetical -- and anything past those is still counted, not dropped.
+constexpr int STRIP_Y    = 152;
+constexpr int STRIP_H    = 16;
+constexpr int STRIP_ROWS = 2;
+
+// --- DATA ------------------------------------------------------------------
+constexpr int CHART_Y = 26;
+constexpr int CHART_H = 84;
 
 // The provider sends 31 days; we draw the tail. A month of bars at this width
 // is a grey smear that answers no question you actually have.
 constexpr int CHART_DAYS = 7;
 
-// The bottom panel: Vault Boy, the meter, and the exposure log share it.
-constexpr int PANEL_Y  = 145;
-constexpr int PANEL_H  = 74;
-constexpr int BOY_X    = MARGIN + 2;
-constexpr int BOY_W    = 84;
-constexpr int METER_X  = BOY_X + BOY_W + 6;
-constexpr int METER_W  = 70;
-constexpr int METER_Y  = PANEL_Y + 10;
-constexpr int LOG_X    = METER_X + METER_W + 6;
-constexpr int LOG_W    = SCREEN_W - MARGIN - 4 - LOG_X;
-constexpr int LOG_Y    = PANEL_Y + 14;
+// The lower band: the exposure log on the left, the burn meter on the right.
+constexpr int PANEL_Y = 118;
+constexpr int PANEL_H = 84;
+
+constexpr int LOG_X = MARGIN;
+constexpr int LOG_Y = PANEL_Y + 6;
+constexpr int LOG_W = 168;
+constexpr int LOG_ROW_H = 15;
 // Where the two right-hand columns end. Both are right-aligned, so these are
 // the pixel after the last one they may light. The tok column is placed from
 // the right edge rather than the left so the two stay clear of each other
 // when the log's width changes.
-constexpr int LOG_CAPS_COL_W = 54;
+constexpr int LOG_CAPS_COL_W = 52;
 constexpr int LOG_TOK_R  = LOG_X + LOG_W - LOG_CAPS_COL_W;
 constexpr int LOG_CAPS_R = LOG_X + LOG_W;
 
-constexpr int FOOT_Y   = 227;   // footer text row; rule sits three above
+constexpr int METER_X = 190;
+constexpr int METER_W = SCREEN_W - MARGIN - METER_X;
+constexpr int METER_Y = PANEL_Y + 2;
 
 // Intensity levels. Pace state is carried by brightness, not colour.
 constexpr uint8_t I_DIM    = 110;
@@ -119,13 +145,17 @@ const char* window_badge(int64_t period_ms);
 
 int hero_width();
 
-// One of the two big cards: badge, percent remaining, drain bar, verdict.
+// One of the two big gauges: badge, label, percent remaining, drain bar, and
+// a verdict-and-countdown row under it. No surrounding box -- the numbers are
+// large enough to hold the space on their own, and a card border around each
+// was most of what made the old screen read as a dashboard.
 void draw_hero(Canvas& c, int x, int y, int w, const ProgressLine& line, const Pace& p);
 
 // A demoted window: one row, badge and bar and percent, no verdict.
 void draw_strip(Canvas& c, int x, int y, int w, const ProgressLine& line, const Pace& p);
 
-// Both heroes, the strip, and the "+N" tag when a window did not fit.
+// Both gauges, the extra rows under them, and the "+N" tag when a window did
+// not fit even there.
 void draw_windows(Canvas& c, const Provider& prov, int64_t now_ms);
 
 void draw_chart(Canvas& c, const Provider& prov);
@@ -170,6 +200,7 @@ void draw_tok_meter(Canvas& c, int x, int y, int w, int64_t tok_per_hour);
 void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v);
 
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock, int64_t tok_per_hour = -1);
+                    int64_t now_ms, const char* clock, int64_t tok_per_hour = -1,
+                    Page page = Page::Stat);
 
 }  // namespace cb

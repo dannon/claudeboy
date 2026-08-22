@@ -113,22 +113,26 @@ void test_degenerate_canvas_is_inert(void) {
 static uint8_t wide[64 * 16];
 static cb::Canvas mkwide() { memset(wide, 0, sizeof wide); return cb::Canvas(wide, 64, 16); }
 
-void test_text_width_advances_six_per_char(void) {
-    TEST_ASSERT_EQUAL_INT(0,  cb::text_width("", 1));
-    TEST_ASSERT_EQUAL_INT(5,  cb::text_width("A", 1));    // last glyph has no trailing gap
-    TEST_ASSERT_EQUAL_INT(11, cb::text_width("AB", 1));
-    TEST_ASSERT_EQUAL_INT(22, cb::text_width("AB", 2));
+void test_text_width_advances_one_cell_per_char(void) {
+    TEST_ASSERT_EQUAL_INT(0, cb::text_width("", 1));
+    // The last glyph carries no trailing gap, so a run of n is n cells wide
+    // less the one gap column at the end.
+    TEST_ASSERT_EQUAL_INT(cb::FONT_ADV - 1, cb::text_width("A", 1));
+    TEST_ASSERT_EQUAL_INT(2 * cb::FONT_ADV - 1, cb::text_width("AB", 1));
+    TEST_ASSERT_EQUAL_INT(2 * (2 * cb::FONT_ADV - 1), cb::text_width("AB", 2));
 }
 
 void test_draw_char_marks_pixels(void) {
     cb::Canvas c = mkwide();
     cb::draw_char(c, 0, 0, 'A', 255, 1);
     int lit = 0;
-    for (int y = 0; y < 7; y++)
-        for (int x = 0; x < 5; x++)
+    for (int y = 0; y < cb::FONT_H; y++)
+        for (int x = 0; x < cb::FONT_W; x++)
             if (c.at(x, y)) lit++;
     TEST_ASSERT_TRUE(lit > 4);       // 'A' is not blank
-    TEST_ASSERT_EQUAL_UINT8(0, c.at(5, 0));   // and stays inside its cell
+    // and nothing of it reaches the next cell along
+    for (int y = 0; y < cb::FONT_H; y++)
+        TEST_ASSERT_EQUAL_UINT8(0, c.at(cb::FONT_ADV, y));
 }
 
 void test_space_draws_nothing(void) {
@@ -155,42 +159,36 @@ void test_unprintable_char_is_skipped(void) {
     for (int i = 0; i < 64 * 16; i++) TEST_ASSERT_EQUAL_UINT8(0, wide[i]);
 }
 
-void test_font_data_matches_known_glyphs(void) {
-    // Verify the font data contains the correct glyphs for ASCII 32, 33, 48, 65.
-    // Each glyph is 5 bytes at index (ch - 32) * 5.
-
-    // ASCII 32 space
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 0]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 1]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 2]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 3]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[0 * 5 + 4]);
-
-    // ASCII 33 '!'
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 0]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 1]);
-    TEST_ASSERT_EQUAL_UINT8(0x5F, cb::FONT_DATA[1 * 5 + 2]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 3]);
-    TEST_ASSERT_EQUAL_UINT8(0x00, cb::FONT_DATA[1 * 5 + 4]);
-
-    // ASCII 48 '0'
-    TEST_ASSERT_EQUAL_UINT8(0x3E, cb::FONT_DATA[16 * 5 + 0]);
-    TEST_ASSERT_EQUAL_UINT8(0x51, cb::FONT_DATA[16 * 5 + 1]);
-    TEST_ASSERT_EQUAL_UINT8(0x49, cb::FONT_DATA[16 * 5 + 2]);
-    TEST_ASSERT_EQUAL_UINT8(0x45, cb::FONT_DATA[16 * 5 + 3]);
-    TEST_ASSERT_EQUAL_UINT8(0x3E, cb::FONT_DATA[16 * 5 + 4]);
-
-    // ASCII 65 'A'
-    TEST_ASSERT_EQUAL_UINT8(0x7C, cb::FONT_DATA[33 * 5 + 0]);
-    TEST_ASSERT_EQUAL_UINT8(0x12, cb::FONT_DATA[33 * 5 + 1]);
-    TEST_ASSERT_EQUAL_UINT8(0x11, cb::FONT_DATA[33 * 5 + 2]);
-    TEST_ASSERT_EQUAL_UINT8(0x12, cb::FONT_DATA[33 * 5 + 3]);
-    TEST_ASSERT_EQUAL_UINT8(0x7C, cb::FONT_DATA[33 * 5 + 4]);
-
-    // Verify font boundaries and size
+void test_the_font_holds_every_printable_glyph(void) {
+    // Row-major: one byte per row, FONT_H rows per glyph, bit 0 leftmost.
     TEST_ASSERT_EQUAL_INT(32, cb::FONT_FIRST);
     TEST_ASSERT_EQUAL_INT(126, cb::FONT_LAST);
-    TEST_ASSERT_EQUAL_INT(475, sizeof(cb::FONT_DATA));
+    TEST_ASSERT_EQUAL_INT((cb::FONT_LAST - cb::FONT_FIRST + 1) * cb::FONT_H,
+                          (int)sizeof(cb::FONT_DATA));
+
+    // Space is the only blank cell; every other code point draws something.
+    for (int ch = cb::FONT_FIRST; ch <= cb::FONT_LAST; ch++) {
+        const uint8_t* g = &cb::FONT_DATA[(ch - cb::FONT_FIRST) * cb::FONT_H];
+        int ink = 0;
+        for (int r = 0; r < cb::FONT_H; r++) ink |= g[r];
+        if (ch == ' ') TEST_ASSERT_EQUAL_INT(0, ink);
+        else           TEST_ASSERT_TRUE(ink != 0);
+    }
+}
+
+void test_the_brackets_still_mirror_each_other(void) {
+    // A raw backslash at the end of a // comment is a line continuation, and
+    // it once swallowed the ']' row out of the generated header: every glyph
+    // past '\\' shifted down one and ']' drew as '^'. Mirroring is the
+    // cheapest check that the array is still in register with ASCII.
+    const uint8_t* open  = &cb::FONT_DATA[('[' - cb::FONT_FIRST) * cb::FONT_H];
+    const uint8_t* close = &cb::FONT_DATA[(']' - cb::FONT_FIRST) * cb::FONT_H];
+    for (int r = 0; r < cb::FONT_H; r++) {
+        uint8_t flipped = 0;
+        for (int b = 0; b < cb::FONT_W; b++)
+            if (open[r] & (1u << b)) flipped |= static_cast<uint8_t>(1u << (cb::FONT_W - 2 - b));
+        TEST_ASSERT_EQUAL_UINT8(flipped, close[r]);
+    }
 }
 
 int main(int, char**) {
@@ -205,11 +203,12 @@ int main(int, char**) {
     RUN_TEST(test_clear);
     RUN_TEST(test_at_returns_zero_out_of_bounds);
     RUN_TEST(test_degenerate_canvas_is_inert);
-    RUN_TEST(test_text_width_advances_six_per_char);
+    RUN_TEST(test_text_width_advances_one_cell_per_char);
     RUN_TEST(test_draw_char_marks_pixels);
     RUN_TEST(test_space_draws_nothing);
     RUN_TEST(test_scale_two_doubles_each_pixel);
     RUN_TEST(test_unprintable_char_is_skipped);
-    RUN_TEST(test_font_data_matches_known_glyphs);
+    RUN_TEST(test_the_font_holds_every_printable_glyph);
+    RUN_TEST(test_the_brackets_still_mirror_each_other);
     return UNITY_END();
 }
