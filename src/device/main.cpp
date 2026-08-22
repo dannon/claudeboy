@@ -3,11 +3,12 @@
 #include <string.h>
 #include "esp_heap_caps.h"
 #include "core/canvas.h"
+#include "core/clock.h"
 #include "core/crt.h"
-#include "core/fixture.h"
 #include "core/frame.h"
 #include "core/palette.h"
 #include "core/screen.h"
+#include "core/store.h"
 #include "core/types.h"
 #include "device/net.h"
 
@@ -26,6 +27,35 @@ static uint32_t g_frame = 0;
 // One association attempt. Longer than a healthy router needs, short enough
 // that a wrong password shows up as a state on the panel rather than a hang.
 static const uint32_t WIFI_TIMEOUT_MS = 15000;
+
+// The two parse arenas and the snapshot on screen. Static, because every
+// string cb::Provider hands the renderer is a bare pointer into one of these
+// and the renderer dereferences it while drawing.
+static cb::ArenaBytes g_arena_a;
+static cb::ArenaBytes g_arena_b;
+static cb::SnapshotStore g_store;
+
+// The whole reply body, before it is parsed. The live client=cyd payload is
+// 3,519 bytes; this holds a couple more providers than exist today and
+// refuses anything larger rather than parsing half a snapshot.
+static char g_body[6144];
+
+// No RTC, no NTP: the clock is seeded from each reply's serverTime.
+static cb::ServerClock g_clock;
+
+// Matching the agent, which polls OpenUsage on the same period. Faster would
+// only buy latency the source does not have.
+static const uint32_t POLL_MS = 60000;
+// A failed fetch is usually a transient one, and until the first success the
+// board has nothing on screen at all, so a failure is worth retrying well
+// inside the minute. Not much sooner, though: a fetch against a network that
+// is associated but going nowhere blocks the render loop until its timeouts
+// expire, and retrying on top of that would leave the panel frozen more than
+// it draws.
+static const uint32_t RETRY_MS = 15000;
+
+static uint32_t g_last_poll_ms = 0;
+static uint32_t g_poll_wait_ms = 0;   // 0, so the first poll goes out as soon as WiFi links
 
 // cb::render_frame() hands each finished row here instead of filling a second
 // canvas -- see core/frame.h for why post-processing stays off the
@@ -47,33 +77,50 @@ static void print_heap(const char* when) {
 // uint32_t here even at the same width, hence the wrapper.
 static uint32_t now_us() { return static_cast<uint32_t>(micros()); }
 
-// The fixture is a frozen capture and the device just keeps counting past it,
-// so every progress window would expire a few minutes in and sit at
-// "SURPLUS 0m" forever. Roll each window forward into the present before
-// drawing, which is what a live feed would have done. Only the device does
-// this: the host stays pinned to the reference instant so the golden holds.
+// One HTTPS GET, parsed and adopted, when one is due. Called between frames
+// and never inside one: the TLS handshake blocks for a second or two and the
+// panel simply holds its last finished frame across it.
 //
-// fetched_at_ms is deliberately NOT moved with it. Rolling a window keeps a
-// derived reading sane; faking the fetch time would lie about the one thing
-// the staleness display exists to report. So the board reads STALE ten minutes
-// after boot and SIGNAL LOST two hours in, which is the truth about a capture
-// compiled into the firmware, and it exercises the chrome on real hardware
-// until the network fetch replaces this whole function.
-static cb::ProgressLine g_lines[8];
-static cb::Provider g_prov;
-static cb::UsageSnapshot g_live;
+// roll_window_forward() is deliberately not used here. It exists so a shelved
+// fixture still shows moving windows; a live resetsAt is already in the
+// future, and walking it forward would invent a window that has not happened.
+static void poll_snapshot() {
+    if (!cbnet::wifi_connected()) return;
+    if (!cb::clock_elapsed(g_last_poll_ms, millis(), g_poll_wait_ms)) return;
 
-static const cb::UsageSnapshot& live_snapshot(int64_t now) {
-    const cb::UsageSnapshot& base = cb::fixture_snapshot();
-    g_prov = base.providers[0];
-    int n = g_prov.progress_count;
-    if (n > (int)(sizeof g_lines / sizeof g_lines[0])) n = sizeof g_lines / sizeof g_lines[0];
-    for (int i = 0; i < n; i++)
-        g_lines[i] = cb::roll_window_forward(base.providers[0].progress[i], now);
-    g_prov.progress = g_lines;
-    g_prov.progress_count = n;
-    g_live = {&g_prov, 1, now};
-    return g_live;
+    size_t len = 0;
+    int status = 0;
+    const uint32_t t0 = millis();
+    const bool got = cbnet::fetch_snapshot(g_body, sizeof g_body, len, status);
+    const uint32_t took_ms = millis() - t0;
+
+    g_last_poll_ms = millis();
+    // A body that arrived but would not parse is a server-side problem, and
+    // hammering it every ten seconds would not fix it. Only a failed fetch
+    // retries early.
+    g_poll_wait_ms = got ? POLL_MS : RETRY_MS;
+
+    int parsed = -1;
+    if (got) {
+        const cb::ParseResult r = cb::store_accept(g_store, g_body, len);
+        parsed = (int)r;
+        const int64_t served = cb::store_current(g_store).server_time_ms;
+        // Seeded from the reply that carried it, against the counter as it
+        // reads now: serverTime was stamped when the Worker served, a few
+        // hundred milliseconds ago, so this runs a touch behind rather than
+        // ahead -- the safe direction for an age. A reply with no serverTime
+        // at all leaves the clock alone rather than throwing it back to 1970.
+        if (r == cb::ParseResult::Ok && served > 0) cb::clock_seed(g_clock, served, millis());
+    }
+
+    // parse is a cb::ParseResult, or -1 when there was no body to parse. The
+    // heap figures are taken after the session came down, so they are what the
+    // next handshake will have to fit into.
+    Serial.printf("claudeboy: poll status=%d bytes=%u parse=%d took=%ums "
+                  "free=%u largest=%u\n",
+                  status, (unsigned)len, parsed, (unsigned)took_ms,
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 void setup() {
@@ -107,6 +154,7 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
 
     cb::palette_build_rgb565_table(g_palette);
+    cb::store_init(g_store, g_arena_a, g_arena_b);
 
     // Last, and deliberately: the framebuffer already holds its contiguous run
     // and the panel is lit, so the screen has something to show while the
@@ -117,21 +165,27 @@ void setup() {
 
 void loop() {
     cbnet::wifi_poll();
+    poll_snapshot();
 
     const cb::EffectParams fx = cb::EffectParams::defaults();
     cb::Canvas c(g_buf, cb::SCREEN_W, cb::SCREEN_H);
 
-    // Phase 1 has no clock source, so the fixture's own reference time is used
-    // and advanced by wall milliseconds since boot. The gauges therefore age.
-    const int64_t now = cb::FIXTURE_REFERENCE_MS + (int64_t)millis();
+    const cb::UsageSnapshot& snap = cb::store_current(g_store);
+    const int64_t now = cb::clock_now(g_clock, millis());
+    // Until the first reply lands the board does not know what time it is, and
+    // a clock counting up from the epoch would be a worse answer than none.
     char clk[8];
-    cb::format_clock(now, clk, sizeof clk);   // UTC; phase 2 brings a real zone
+    const char* clock_text = nullptr;
+    if (now > 0) {
+        cb::format_clock(now, clk, sizeof clk);   // UTC; a real zone is still to come
+        clock_text = clk;
+    }
 
     cb::FrameTiming timing{now_us, 0, 0};
     const uint32_t t_frame_start = micros();
     tft.startWrite();
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
-    cb::render_frame(c, live_snapshot(now), 0, now, clk, fx,
+    cb::render_frame(c, snap, 0, now, clock_text, fx,
                      g_frame, g_ring, sizeof g_ring,
                      g_out_row, push_row, nullptr, &timing);
     tft.endWrite();
