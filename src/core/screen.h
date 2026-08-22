@@ -21,17 +21,18 @@ constexpr int TAB_H  = 18;    // the rule row; tab text sits at TAB_Y
 constexpr int FOOT_Y = 212;   // footer text row; its rule sits four above
 
 // --- STAT ------------------------------------------------------------------
-// Vault Boy is the hero here, not a thumbnail in a corner. Three pixels per
-// bead rather than two: see draw_vault_boy() for why that costs no new art.
-constexpr int BOY_NUM = 3, BOY_DEN = 2;
+// Vault Boy is the hero here, not a thumbnail in a corner. Drawn 1:1 now that
+// the art is traced at the size it is shown -- upscaling was a way of buying
+// detail the old hand-drawn bead grid did not have.
+constexpr int BOY_NUM = 1, BOY_DEN = 1;
 constexpr int BOY_W = VB_W * BOY_NUM / BOY_DEN;   // 126
 constexpr int BOY_H = VB_H * BOY_NUM / BOY_DEN;   // 105
 constexpr int BOY_X = MARGIN;
-constexpr int BOY_Y = 34;
+constexpr int BOY_Y = 24;
 
 // The session block and the weekly ration, stacked down the right. These are
 // the two figures the whole device exists to show, so they get the big type.
-constexpr int HERO_X     = 148;
+constexpr int HERO_X     = 126;
 constexpr int HERO_W     = SCREEN_W - MARGIN - HERO_X;
 constexpr int HERO_Y     = 26;
 constexpr int HERO_PITCH = 66;   // top of the second gauge, from the first

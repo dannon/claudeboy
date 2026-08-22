@@ -63,11 +63,25 @@ void test_every_pose_stays_inside_its_box(void) {
         TEST_ASSERT_TRUE(lit_in(c, 40, 60, cb::VB_W, cb::VB_H) > 300);
         TEST_ASSERT_EQUAL_INT(lit_in(c, 0, 0, cb::SCREEN_W, cb::SCREEN_H),
                               lit_in(c, 40, 60, cb::VB_W, cb::VB_H));
-        // A short row in the art would silently clip him; every pose has to
-        // reach both edges of its box and the bottom of it.
-        TEST_ASSERT_TRUE(lit_in(c, 40, 60, 4, cb::VB_H) > 0);
-        TEST_ASSERT_TRUE(lit_in(c, 40 + cb::VB_W - 4, 60, 4, cb::VB_H) > 0);
-        TEST_ASSERT_TRUE(lit_in(c, 40, 60 + cb::VB_H - 1, cb::VB_W, 1) > 0);
+    }
+}
+
+void test_every_art_row_is_the_full_width(void) {
+    // A row short of VB_W clips that scanline of the sprite and nothing says
+    // so -- draw_vault_boy() stops at the terminator and carries on. The
+    // arrays are pasted in from tools/make_vaultboy.py, so this is the check
+    // that the paste was complete. It replaces an older assertion that every
+    // pose had to touch all four edges of its box, which only held while the
+    // art was hand-drawn to fill it: the traced poses are letterboxed, and
+    // making them reach the edges would mean stretching them off-aspect.
+    const cb::BoyMood moods[] = {cb::BoyMood::Fine, cb::BoyMood::Steady, cb::BoyMood::Fried};
+    for (cb::BoyMood m : moods) {
+        const char* const* art = cb::boy_art(m);
+        TEST_ASSERT_NOT_NULL(art);
+        for (int y = 0; y < cb::VB_H; y++) {
+            TEST_ASSERT_NOT_NULL(art[y]);
+            TEST_ASSERT_EQUAL_INT(cb::VB_W, (int)strlen(art[y]));
+        }
     }
 }
 
@@ -97,6 +111,7 @@ int main(int, char**) {
     RUN_TEST(test_a_window_too_young_to_judge_gets_a_neutral_face);
     RUN_TEST(test_nothing_readable_is_not_good_news);
     RUN_TEST(test_every_pose_stays_inside_its_box);
+    RUN_TEST(test_every_art_row_is_the_full_width);
     RUN_TEST(test_the_three_poses_are_actually_different);
     RUN_TEST(test_drawing_off_the_edge_does_not_write_past_the_canvas);
     return UNITY_END();
