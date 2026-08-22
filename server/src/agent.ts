@@ -91,6 +91,10 @@ export async function pollOnce(
   }
 
   const body = transformOpenUsage(raw);
+  // getTimezoneOffset() is minutes WEST of UTC, so it is the negation of what
+  // the clients want to add. Recomputed every poll, which is what makes DST a
+  // non-event rather than a twice-yearly bug.
+  body.utcOffsetSec = -new Date().getTimezoneOffset() * 60;
   if (body.providers.length === 0) {
     // An empty result means OpenUsage is up but has nothing, usually because it
     // just launched. Never overwrite good data with nothing.

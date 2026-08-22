@@ -19,6 +19,7 @@ export function shapeForClient(snapshot: Snapshot, client: string | null): Snaps
   if (client?.toLowerCase() !== 'watch') return snapshot;
   return {
     serverTime: snapshot.serverTime,
+    utcOffsetSec: snapshot.utcOffsetSec,
     providers: snapshot.providers.map((p): Provider => ({
       id: p.id,
       displayName: p.displayName,

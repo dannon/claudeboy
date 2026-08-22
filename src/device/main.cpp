@@ -177,7 +177,10 @@ void loop() {
     char clk[8];
     const char* clock_text = nullptr;
     if (now > 0) {
-        cb::format_clock(now, clk, sizeof clk);   // UTC; a real zone is still to come
+        // The agent reports its own UTC offset with every push, so this is real
+        // local time without an NTP client or a timezone database on the board.
+        const int64_t local = now + (int64_t)snap.utc_offset_sec * 1000;
+        cb::format_clock(local, clk, sizeof clk);
         clock_text = clk;
     }
 

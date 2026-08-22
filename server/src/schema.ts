@@ -41,6 +41,13 @@ export interface Provider {
 /** What the agent POSTs. Carries no clock of its own -- see Snapshot. */
 export interface PushBody {
   providers: Provider[];
+  /**
+   * Seconds to add to UTC for the Mac's local wall time, e.g. -14400 for EDT.
+   * The agent reports it because the agent is the only part of this system that
+   * knows the user's timezone -- the Worker has no idea and the ESP32 has no
+   * timezone database. Re-sent on every push, so DST corrects itself.
+   */
+  utcOffsetSec?: number;
 }
 
 /** What a client GETs. serverTime is stamped by the Worker at serve time. */
@@ -193,7 +200,15 @@ export function validatePushBody(u: unknown): ValidationResult {
     const providers = arr(u, 'providers', 'body').map((p, i) =>
       provider(p, `providers[${i}]`),
     );
-    return { ok: true, value: { providers } };
+    const value: PushBody = { providers };
+    if (u['utcOffsetSec'] !== undefined) {
+      const off = int(u, 'utcOffsetSec', 'body');
+      // +/- 14h and +/- 15m granularity covers every real zone; anything else
+      // is a bug upstream, not a place nobody has thought of.
+      if (Math.abs(off) > 14 * 3600) throw new Error('body.utcOffsetSec out of range');
+      value.utcOffsetSec = off;
+    }
+    return { ok: true, value };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

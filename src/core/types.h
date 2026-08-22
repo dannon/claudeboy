@@ -39,6 +39,11 @@ struct Provider {
 struct UsageSnapshot {
     const Provider* providers; int provider_count;
     int64_t server_time_ms;
+    // Seconds to add to UTC for local wall time. Reported by the Mac agent,
+    // which is the only part of the system that knows the user's timezone --
+    // the Worker has no idea and this device has no timezone database. Re-sent
+    // every poll, so DST corrects itself without anyone noticing.
+    int32_t utc_offset_sec;
 };
 
 struct Pace {

@@ -413,6 +413,7 @@ ParseResult parse_snapshot(const char* json, size_t len, ParseArena& arena,
     out.providers = nullptr;
     out.provider_count = 0;
     out.server_time_ms = 0;
+    out.utc_offset_sec = 0;
     // Truncated is a renderable result and the renderer dereferences every
     // const char* it is handed, so a string arena that cannot even hold the
     // reserved NUL is refused here rather than allowed to produce null or
@@ -435,6 +436,14 @@ ParseResult parse_snapshot(const char* json, size_t len, ParseArena& arena,
                 int64_t v = 0;
                 if (!s.number(v)) break;
                 out.server_time_ms = to_ms(v);
+            } else if (key_is(kb, ke, "utcOffsetSec")) {
+                int64_t v = 0;
+                if (!s.number(v)) break;
+                // Clamp rather than reject: a nonsense offset should cost the
+                // clock its zone, not the whole snapshot its numbers.
+                if (v < -50400) v = -50400;
+                if (v > 50400) v = 50400;
+                out.utc_offset_sec = static_cast<int32_t>(v);
             } else if (key_is(kb, ke, "providers")) {
                 s.parse_providers(out);
                 if (s.bad) break;

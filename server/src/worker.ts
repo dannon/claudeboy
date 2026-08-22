@@ -86,6 +86,12 @@ async function handlePush(request: Request, env: Env): Promise<Response> {
   // agent sent -- notably a serverTime, which must come from this Worker's clock
   // at serve time and never from the push.
   const body: PushBody = { providers: result.value.providers };
+  // The offset is the agent's to report and must survive into KV; serverTime
+  // still must not, which is why this rebuilds field by field rather than
+  // storing the parsed body wholesale.
+  if (result.value.utcOffsetSec !== undefined) {
+    body.utcOffsetSec = result.value.utcOffsetSec;
+  }
   await env.SNAPSHOTS.put(KV_KEY, JSON.stringify(body));
   return new Response(null, { status: 204 });
 }
@@ -116,6 +122,9 @@ async function handleSnapshot(request: Request, env: Env): Promise<Response> {
     serverTime: Math.floor(Date.now() / 1000),
     providers: validated.value.providers,
   };
+  if (validated.value.utcOffsetSec !== undefined) {
+    snapshot.utcOffsetSec = validated.value.utcOffsetSec;
+  }
   const client = new URL(request.url).searchParams.get('client');
   return new Response(JSON.stringify(shapeForClient(snapshot, client)), {
     status: 200, headers: JSON_HEADERS,
