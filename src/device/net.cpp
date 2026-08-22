@@ -5,6 +5,9 @@
 
 #include "esp_heap_caps.h"
 
+#if !__has_include("device/secrets.h")
+#error "src/device/secrets.h is missing: copy src/device/secrets.h.example to src/device/secrets.h and fill it in. The real file is git-ignored."
+#endif
 #include "device/secrets.h"
 
 namespace cbnet {
@@ -70,7 +73,12 @@ void wifi_poll() {
                 enter(State::Linked);
                 report_association();
             } else if (elapsed(g_since_ms, g_timeout_ms)) {
-                WiFi.disconnect(true);
+                // false, not true. disconnect(true) routes to enableSTA(false),
+                // which stops the driver outright, so the 30s retry pays a
+                // synchronous esp_wifi_stop/start inside loop() and frees and
+                // reallocates the driver's heap buffers each cycle -- the
+                // contiguity the framebuffer-first ordering exists to protect.
+                WiFi.disconnect(false);
                 enter(State::NoLink);
                 Serial.println("claudeboy: wifi association timed out");
             }

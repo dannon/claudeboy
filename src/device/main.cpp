@@ -140,9 +140,16 @@ void loop() {
     // Post-processing and the SPI push are one stage now: each row goes
     // straight to the panel as it is finished, so they cannot be timed apart.
     if ((g_frame % 30) == 0) {   // roughly every 30 frames, so serial stays readable
-        Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus %s\n",
+        // The heap figures ride along because the WiFi stack allocates lazily
+        // as traffic starts: the one reading taken at the association instant
+        // is the most optimistic the board will ever produce, and the
+        // largest-block number is what decides whether TLS fits.
+        Serial.printf("claudeboy: render=%uus post+push=%uus total=%uus %s "
+                      "free=%u largest=%u\n",
                       (unsigned)timing.render_us, (unsigned)timing.post_us,
-                      (unsigned)total_us, cbnet::wifi_status_text());
+                      (unsigned)total_us, cbnet::wifi_status_text(),
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     }
 
     g_frame++;
