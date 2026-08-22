@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "core/fastdiv.h"
+#include "core/vaultboy.h"
 
 namespace cb {
 
@@ -496,6 +497,9 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
     draw_exposure_log(c, LOG_X, PANEL_Y + 6, LOG_W, prov);
     draw_rad_meter(c, METER_X, PANEL_Y + 3, METER_W, rads_per_hour);
+    // Bottom-anchored: he is a figure standing behind the panel edge, and a
+    // figure floating in the middle of a box reads as a sticker.
+    draw_vault_boy(c, BOY_X, PANEL_Y + PANEL_H - VB_H - 1, boy_mood(prov, now_ms));
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
     if (f != Freshness::Fresh) dim_band(c, HERO_Y, PANEL_Y + PANEL_H - HERO_Y, I_STALE_SCALE);
