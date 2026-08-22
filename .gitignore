@@ -9,3 +9,5 @@ src/device/secrets.h
 
 # Connect IQ build output
 watch/bin/
+watch/resources/settings/properties.xml
+watch/source/Secrets.mc

@@ -135,3 +135,18 @@ describe('validatePushBody', () => {
     expect(validatePushBody({ providers: [] }).ok).toBe(true);
   });
 });
+
+describe('optional resetsAt', () => {
+  it('accepts a progress line with no resetsAt', () => {
+    const body = structuredClone(VALID);
+    delete (body.providers[0]!.progress[0] as any).resetsAt;
+    const r = validatePushBody(body);
+    expect(r.ok, r.ok ? '' : r.error).toBe(true);
+    if (r.ok) expect(r.value.providers[0]!.progress[0]!.resetsAt).toBeUndefined();
+  });
+
+  it('still rejects a resetsAt that is present but malformed', () => {
+    reject((b) => (b.providers[0].progress[0].resetsAt = 'soon'), 'resetsAt');
+    reject((b) => (b.providers[0].progress[0].resetsAt = 1787340600000), 'seconds');
+  });
+});

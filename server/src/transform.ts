@@ -43,18 +43,26 @@ function progressFrom(line: RawLine): ProgressLine | null {
   const label = typeof line.label === 'string' ? line.label : null;
   const used = toInt(line.used);
   const limit = toInt(line.limit);
-  const resetsAt = toEpochSec(line.resetsAt);
+  // undefined means "no window started" and is kept; a present-but-unparseable
+  // value is still a reason to drop the line.
+  const hasReset = line.resetsAt !== undefined && line.resetsAt !== null;
+  const parsedReset = hasReset ? toEpochSec(line.resetsAt) : null;
   const periodMs = toInt(line.periodDurationMs);
   if (label === null || used === null || limit === null) return null;
-  if (resetsAt === null || periodMs === null) return null;
+  if (periodMs === null) return null;
+  if (hasReset && parsedReset === null) return null;
+  const resetsAt: number | undefined = parsedReset === null ? undefined : parsedReset;
   const periodSec = Math.round(periodMs / 1000);
   // A zero limit or period is a divide-by-zero downstream and negative use is
   // nonsense, so the validator refuses them; catch them here while it still
   // costs one line.
   if (used < 0 || limit < 1 || periodSec < 1) return null;
   if (!fitsInt32(used) || !fitsInt32(limit)) return null;
-  if (!fitsInt32(resetsAt) || !fitsInt32(periodSec)) return null;
-  return { label, used, limit, resetsAt, periodSec };
+  if (!fitsInt32(periodSec)) return null;
+  if (resetsAt !== undefined && !fitsInt32(resetsAt)) return null;
+  const out: ProgressLine = { label, used, limit, periodSec };
+  if (resetsAt !== undefined) out.resetsAt = resetsAt;
+  return out;
 }
 
 function textFrom(line: RawLine): TextLine | null {

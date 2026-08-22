@@ -161,3 +161,42 @@ describe('transformOpenUsage', () => {
     expect(transformOpenUsage(raw)).toEqual(golden);
   });
 });
+
+describe('a window that has not started', () => {
+  // OpenUsage omits resetsAt for a session block with no usage yet -- the five
+  // hours begin on first use. Dropping the line for that made the board's
+  // Session card vanish entirely, which is the bug this covers.
+  function withoutReset() {
+    const doctored = structuredClone(raw);
+    const claude = doctored.find((p: any) => p.providerId === 'claude');
+    const session = claude.lines.find((l: any) => l.type === 'progress');
+    delete session.resetsAt;
+    session.used = 0;
+    return doctored;
+  }
+
+  it('keeps a progress line that has no resetsAt', () => {
+    const claude = transformOpenUsage(withoutReset()).providers.find((p) => p.id === 'claude')!;
+    expect(claude.progress.map((l) => l.label)).toContain('Session');
+  });
+
+  it('omits resetsAt rather than emitting null or zero', () => {
+    const line = transformOpenUsage(withoutReset())
+      .providers.find((p) => p.id === 'claude')!.progress[0]!;
+    expect('resetsAt' in line).toBe(false);
+    expect(JSON.stringify(line)).not.toContain('resetsAt');
+  });
+
+  it('still validates', () => {
+    const r = validatePushBody(transformOpenUsage(withoutReset()));
+    expect(r.ok, r.ok ? '' : r.error).toBe(true);
+  });
+
+  it('still DROPS a line whose resetsAt is present but unparseable', () => {
+    const doctored = structuredClone(raw);
+    const claude = doctored.find((p: any) => p.providerId === 'claude');
+    claude.lines.find((l: any) => l.type === 'progress').resetsAt = 'not a date';
+    const out = transformOpenUsage(doctored).providers.find((p) => p.id === 'claude')!;
+    expect(out.progress.map((l) => l.label)).not.toContain('Session');
+  });
+});

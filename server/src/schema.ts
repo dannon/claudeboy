@@ -8,7 +8,13 @@ export interface ProgressLine {
   label: string;
   used: number;
   limit: number;
-  resetsAt: number;
+  /**
+   * Absent when the window has not started. OpenUsage omits it for a session
+   * block with no usage yet -- the five hours begin on first use, not on the
+   * hour, so there is genuinely no reset time to report. Treating that as
+   * malformed is what made the board's Session card disappear entirely.
+   */
+  resetsAt?: number;
   periodSec: number;
 }
 
@@ -123,15 +129,21 @@ function arr(o: Record<string, unknown>, key: string, where: string): unknown[] 
 
 function progressLine(u: unknown, where: string): ProgressLine {
   if (!isRecord(u)) throw new Error(`${where} must be an object`);
-  return {
+  const line: ProgressLine = {
     label: str(u, 'label', where),
     used: intAtLeast(u, 'used', where, 0),
     // A zero limit or period is a divide-by-zero in every percentage the Worker,
     // the CYD and the watch compute, so it never gets past the push.
     limit: intAtLeast(u, 'limit', where, 1),
-    resetsAt: epochSec(u, 'resetsAt', where),
     periodSec: durationSec(u, 'periodSec', where),
   };
+  // Absent and malformed are different. Absent means the window has not started
+  // -- a real state OpenUsage reports by omission. A present but bad value is
+  // still rejected.
+  if (u['resetsAt'] !== undefined && u['resetsAt'] !== null) {
+    line.resetsAt = epochSec(u, 'resetsAt', where);
+  }
+  return line;
 }
 
 function textLine(u: unknown, where: string): TextLine {
