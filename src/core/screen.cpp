@@ -301,7 +301,7 @@ void draw_chart(Canvas& c, const Provider& prov) {
 }
 
 
-void format_rads(int64_t v, char* out, size_t n) {
+void format_tok(int64_t v, char* out, size_t n) {
     if (!out || n == 0) return;
     if (v < 0) { snprintf(out, n, "--"); return; }
     struct Unit { int64_t div; char suffix; };
@@ -361,14 +361,14 @@ int64_t chart_total(const Provider& prov, int days) {
 void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov) {
     (void)w;
     static const char* kRows[] = {"TODAY", "YSTRDY", "30 DAY"};
-    // Row labels are ours, not the provider's, and the RADS beside them come
+    // Row labels are ours, not the provider's, and the TOK beside them come
     // from the daily chart -- so that column cannot disagree with its label.
     // CAPS is read from prov.text by position, which is the one assumption
     // here: OpenUsage sends today, yesterday, then the thirty-day total. A
     // text array too short for a row simply leaves that row's caps blank.
-    const int rads_r = x + 106, caps_r = x + w;
+    const int tok_r = x + 106, caps_r = x + w;
 
-    draw_text(c, rads_r - text_width("RADS", 1), y, "RADS", I_DIM, 1);
+    draw_text(c, tok_r - text_width("TOK", 1), y, "TOK", I_DIM, 1);
     draw_text(c, caps_r - text_width("CAPS", 1), y, "CAPS", I_DIM, 1);
 
     for (int i = 0; i < 3; i++) {
@@ -384,9 +384,9 @@ void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov) {
         } else {
             tokens = chart_total(prov, 30);
         }
-        char rads[12];
-        format_rads(tokens, rads, sizeof rads);
-        draw_text(c, rads_r - text_width(rads, 1), ry, rads,
+        char tok[12];
+        format_tok(tokens, tok, sizeof tok);
+        draw_text(c, tok_r - text_width(tok, 1), ry, tok,
                   tokens < 0 ? I_DIM : I_NORMAL, 1);
 
         const int64_t caps = (prov.text && i < prov.text_count) ? parse_caps(prov.text[i].value) : -1;
@@ -462,16 +462,16 @@ const char* vault_caption(Freshness f, PaceState worst) {
     }
 }
 
-void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
+void draw_tok_meter(Canvas& c, int x, int y, int w, int64_t tok_per_hour) {
     const int cx = x + w / 2, cy = y + 44, r = 30;
     static const float kPi = 3.14159265f;
 
-    const int title_w = text_width("RAD/HR", 1);
-    draw_text(c, cx - title_w / 2, y + 3, "RAD/HR", I_DIM, 1);
+    const int title_w = text_width("TOK/HR", 1);
+    draw_text(c, cx - title_w / 2, y + 3, "TOK/HR", I_DIM, 1);
 
     // The dial runs left to right: nothing at all on the left, full scale on
     // the right, so a rising rate sweeps the way a rising needle should.
-    const int danger_deg = static_cast<int>((1.0f - RAD_DANGER_FRAC) * 180.0f);
+    const int danger_deg = static_cast<int>((1.0f - TOK_DANGER_FRAC) * 180.0f);
     for (int deg = 0; deg <= 180; deg++) {
         const float a = deg * (kPi / 180.0f);
         const float ca = cosf(a), sa = sinf(a);
@@ -492,13 +492,13 @@ void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
     }
 
     float frac = 0.0f;
-    if (rads_per_hour > 0) {
-        frac = static_cast<float>(rads_per_hour) / static_cast<float>(RAD_FULL_SCALE);
+    if (tok_per_hour > 0) {
+        frac = static_cast<float>(tok_per_hour) / static_cast<float>(TOK_FULL_SCALE);
         if (frac > 1.0f) frac = 1.0f;
     }
     const float na = (1.0f - frac) * kPi;
     const float nca = cosf(na), nsa = sinf(na);
-    const uint8_t nv = rads_per_hour < 0 ? I_DIM : I_BRIGHT;
+    const uint8_t nv = tok_per_hour < 0 ? I_DIM : I_BRIGHT;
     for (int t = 0; t <= r - 7; t++)
         c.plot(cx + static_cast<int>(lroundf(t * nca)),
                cy - static_cast<int>(lroundf(t * nsa)), nv);
@@ -507,13 +507,13 @@ void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
             if (dx * dx + dy * dy <= 4) c.plot(cx + dx, cy + dy, nv);
 
     char rate[12];
-    format_rads(rads_per_hour, rate, sizeof rate);
+    format_tok(tok_per_hour, rate, sizeof rate);
     draw_text(c, cx - text_width(rate, 1) / 2, y + 48, rate,
-              rads_per_hour < 0 ? I_DIM : I_NORMAL, 1);
+              tok_per_hour < 0 ? I_DIM : I_NORMAL, 1);
 }
 
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock, int64_t rads_per_hour) {
+                    int64_t now_ms, const char* clock, int64_t tok_per_hour) {
     draw_tabs(c, snap, provider_index, clock);
 
     const Freshness f = freshness_of(snap, now_ms);
@@ -538,7 +538,7 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     draw_chart(c, prov);
     c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
     draw_exposure_log(c, LOG_X, PANEL_Y + 6, LOG_W, prov);
-    draw_rad_meter(c, METER_X, PANEL_Y + 3, METER_W, rads_per_hour);
+    draw_tok_meter(c, METER_X, PANEL_Y + 3, METER_W, tok_per_hour);
     // Bottom-anchored: he is a figure standing behind the panel edge, and a
     // figure floating in the middle of a box reads as a sticker.
     draw_vault_boy(c, BOY_X, PANEL_Y + PANEL_H - VB_H - 1, boy_mood(prov, now_ms));

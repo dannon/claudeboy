@@ -308,21 +308,21 @@ void test_unknown_state_draws_no_tick(void) {
 
 // --- exposure log -----------------------------------------------------------
 
-void test_format_rads_abbreviates_with_one_decimal(void) {
+void test_format_tok_abbreviates_with_one_decimal(void) {
     char b[12];
-    cb::format_rads(0, b, sizeof b);             TEST_ASSERT_EQUAL_STRING("0", b);
-    cb::format_rads(742, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("742", b);
-    cb::format_rads(999, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("999", b);
-    cb::format_rads(1000, b, sizeof b);          TEST_ASSERT_EQUAL_STRING("1.0K", b);
-    cb::format_rads(56278305, b, sizeof b);      TEST_ASSERT_EQUAL_STRING("56.3M", b);
-    cb::format_rads(208264047, b, sizeof b);     TEST_ASSERT_EQUAL_STRING("208.3M", b);
-    cb::format_rads(4800000000LL, b, sizeof b);  TEST_ASSERT_EQUAL_STRING("4.8B", b);
+    cb::format_tok(0, b, sizeof b);             TEST_ASSERT_EQUAL_STRING("0", b);
+    cb::format_tok(742, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("742", b);
+    cb::format_tok(999, b, sizeof b);           TEST_ASSERT_EQUAL_STRING("999", b);
+    cb::format_tok(1000, b, sizeof b);          TEST_ASSERT_EQUAL_STRING("1.0K", b);
+    cb::format_tok(56278305, b, sizeof b);      TEST_ASSERT_EQUAL_STRING("56.3M", b);
+    cb::format_tok(208264047, b, sizeof b);     TEST_ASSERT_EQUAL_STRING("208.3M", b);
+    cb::format_tok(4800000000LL, b, sizeof b);  TEST_ASSERT_EQUAL_STRING("4.8B", b);
     // Rounding must carry into the whole part rather than print "9.10M".
-    cb::format_rads(9990000, b, sizeof b);       TEST_ASSERT_EQUAL_STRING("10.0M", b);
+    cb::format_tok(9990000, b, sizeof b);       TEST_ASSERT_EQUAL_STRING("10.0M", b);
     // A count we could not work out reads as absent, not as zero.
-    cb::format_rads(-1, b, sizeof b);            TEST_ASSERT_EQUAL_STRING("--", b);
+    cb::format_tok(-1, b, sizeof b);            TEST_ASSERT_EQUAL_STRING("--", b);
     // Nothing here may outgrow the column it is right-aligned in.
-    cb::format_rads(999900000000LL, b, sizeof b);
+    cb::format_tok(999900000000LL, b, sizeof b);
     TEST_ASSERT_TRUE(cb::text_width(b, 1) <= 106);
 }
 
@@ -389,25 +389,25 @@ void test_exposure_log_stays_in_the_panel(void) {
 
 void test_a_provider_with_no_text_still_draws_the_log(void) {
     cb::Canvas c = mks();
-    // Chart but no text: the RADS column is derived from the chart and stands
+    // Chart but no text: the TOK column is derived from the chart and stands
     // on its own, so it must still be there with the caps column blank.
     cb::Provider p = cb::fixture_snapshot().providers[0];
     p.text = nullptr; p.text_count = 0;
     cb::draw_exposure_log(c, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W, p);
-    const int rads_r = cb::LOG_X + 106;
-    const int caps_w = cb::LOG_X + cb::LOG_W - rads_r;
+    const int tok_r = cb::LOG_X + 106;
+    const int caps_w = cb::LOG_X + cb::LOG_W - tok_r;
     // mks() hands out the one shared buffer, so read both counts off this
     // render before starting the next one.
-    const int rads_no_text = lit_in(c, cb::LOG_X, cb::PANEL_Y, rads_r - cb::LOG_X, cb::PANEL_H);
-    const int caps_no_text = lit_in(c, rads_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
+    const int rads_no_text = lit_in(c, cb::LOG_X, cb::PANEL_Y, tok_r - cb::LOG_X, cb::PANEL_H);
+    const int caps_no_text = lit_in(c, tok_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
 
     cb::Canvas full = mks();
     cb::draw_exposure_log(full, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W,
                           cb::fixture_snapshot().providers[0]);
-    const int rads_with_text = lit_in(full, cb::LOG_X, cb::PANEL_Y, rads_r - cb::LOG_X, cb::PANEL_H);
-    const int caps_with_text = lit_in(full, rads_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
+    const int rads_with_text = lit_in(full, cb::LOG_X, cb::PANEL_Y, tok_r - cb::LOG_X, cb::PANEL_H);
+    const int caps_with_text = lit_in(full, tok_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
 
-    // The rads column comes from the chart and does not care about text at all.
+    // The tok column comes from the chart and does not care about text at all.
     TEST_ASSERT_TRUE(rads_no_text > 100);
     TEST_ASSERT_EQUAL_INT(rads_with_text, rads_no_text);
 
@@ -509,7 +509,7 @@ void test_burnout_is_the_only_caption_drawn_bright(void) {
     TEST_ASSERT_TRUE(hot / hot_len > calm / calm_len);
 }
 
-// --- rad meter --------------------------------------------------------------
+// --- tok meter --------------------------------------------------------------
 
 // Where the needle's own pixels fall, clear of the arc and of the quarter
 // ticks: the needle reaches r-7 from the pivot and the innermost tick starts
@@ -520,20 +520,20 @@ static const int MET_CY = cb::PANEL_Y + 3 + 44;
 void test_the_needle_deflects_with_the_rate(void) {
     // Zero points left.
     cb::Canvas c = mks();
-    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 0);
+    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 0);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX - 21, MET_CY));
     TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX, MET_CY - 20));
     TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX + 22, MET_CY));
 
     // Half scale points straight up.
     cb::Canvas d = mks();
-    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE / 2);
+    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE / 2);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, d.at(MET_CX, MET_CY - 20));
     TEST_ASSERT_EQUAL_UINT8(0, d.at(MET_CX - 21, MET_CY));
 
     // Full scale points right.
     cb::Canvas e = mks();
-    cb::draw_rad_meter(e, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE);
+    cb::draw_tok_meter(e, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, e.at(MET_CX + 22, MET_CY));
     TEST_ASSERT_EQUAL_UINT8(0, e.at(MET_CX, MET_CY - 20));
 }
@@ -543,32 +543,32 @@ void test_a_rate_past_full_scale_pins_rather_than_overshooting(void) {
     // needles and not of how many digits each rate happens to print.
     const int dial_h = MET_CY + 3 - (cb::PANEL_Y + 3);
     cb::Canvas c = mks();
-    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE * 5);
+    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE * 5);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX + 22, MET_CY));
     const int over = lit_in(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h);
 
     cb::Canvas d = mks();
-    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE);
+    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE);
     // Five times over the scale draws exactly what full scale draws: the
     // needle stops at the end of the dial instead of carrying on round it.
     TEST_ASSERT_EQUAL_INT(lit_in(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h), over);
     // But the figure beside it still says what the rate actually was.
     char full[12], past[12];
-    cb::format_rads(cb::RAD_FULL_SCALE, full, sizeof full);
-    cb::format_rads(cb::RAD_FULL_SCALE * 5, past, sizeof past);
+    cb::format_tok(cb::TOK_FULL_SCALE, full, sizeof full);
+    cb::format_tok(cb::TOK_FULL_SCALE * 5, past, sizeof past);
     TEST_ASSERT_TRUE(strcmp(full, past) != 0);
 }
 
 void test_an_unknown_rate_rests_dim_and_shows_no_figure(void) {
     cb::Canvas c = mks();
-    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, -1);
+    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, -1);
     // At rest, like zero -- but dim, because "no reading yet" and "nothing
     // being consumed" are different claims and must not look the same.
     TEST_ASSERT_EQUAL_UINT8(cb::I_DIM, c.at(MET_CX - 21, MET_CY));
 
     const int unknown_readout = lit_in(c, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
     cb::Canvas d = mks();
-    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 15000000);
+    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 15000000);
     const int known_readout = lit_in(d, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
     TEST_ASSERT_TRUE(unknown_readout > 0);          // "--", not a blank
     TEST_ASSERT_TRUE(unknown_readout * 2 < known_readout);
@@ -576,7 +576,7 @@ void test_an_unknown_rate_rests_dim_and_shows_no_figure(void) {
 
 void test_the_meter_stays_in_its_third_of_the_panel(void) {
     cb::Canvas c = mks();
-    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE / 3);
+    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE / 3);
     TEST_ASSERT_TRUE(lit_in(c, cb::METER_X, cb::PANEL_Y, cb::METER_W, cb::PANEL_H) > 100);
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::METER_X, cb::SCREEN_H));
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::METER_X + cb::METER_W, 0,
@@ -801,7 +801,7 @@ int main(int, char**) {
     RUN_TEST(test_verdict_and_countdown_stay_inside_the_hero);
     RUN_TEST(test_invalid_pace_draws_no_gauge);
     RUN_TEST(test_unknown_state_draws_no_tick);
-    RUN_TEST(test_format_rads_abbreviates_with_one_decimal);
+    RUN_TEST(test_format_tok_abbreviates_with_one_decimal);
     RUN_TEST(test_parse_caps_reads_the_dollar_figure);
     RUN_TEST(test_format_caps_groups_thousands);
     RUN_TEST(test_chart_total_sums_the_tail);

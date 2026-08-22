@@ -7,7 +7,7 @@
 
 namespace cb {
 
-// `rads_per_hour` is the measured burn rate the bottom panel's needle points
+// `tok_per_hour` is the measured burn rate the bottom panel's needle points
 // at, and rides on the end of both forms because only the device has a
 // BurnHistory to measure it from. -1 -- the default -- means "not known",
 // which is what the host preview and every test render.
@@ -43,7 +43,7 @@ struct FrameTiming {
 void render_frame(Canvas& accum, Canvas& out, const UsageSnapshot& snap, int provider_index,
                   int64_t now_ms, const char* clock, const EffectParams& fx,
                   uint32_t frame, uint8_t* ring, size_t ring_bytes,
-                  FrameTiming* timing = nullptr, int64_t rads_per_hour = -1);
+                  FrameTiming* timing = nullptr, int64_t tok_per_hour = -1);
 
 // The same frame, emitted a row at a time. This is what the device uses: it
 // holds no output framebuffer at all, just the bloom ring and one scratch row,
@@ -52,6 +52,6 @@ void render_frame(Canvas& accum, const UsageSnapshot& snap, int provider_index,
                   int64_t now_ms, const char* clock, const EffectParams& fx,
                   uint32_t frame, uint8_t* ring, size_t ring_bytes,
                   uint8_t* out_row, RowSink sink, void* ctx,
-                  FrameTiming* timing = nullptr, int64_t rads_per_hour = -1);
+                  FrameTiming* timing = nullptr, int64_t tok_per_hour = -1);
 
 }  // namespace cb

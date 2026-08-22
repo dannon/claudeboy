@@ -31,18 +31,18 @@ constexpr int CHART_H  = 44;
 // is a grey smear that answers no question you actually have.
 constexpr int CHART_DAYS = 7;
 
-// The bottom panel: Vault Boy, the rad meter, and the exposure log share it.
+// The bottom panel: Vault Boy, the meter, and the exposure log share it.
 constexpr int PANEL_Y  = 153;
 constexpr int PANEL_H  = 60;
 constexpr int BOY_X    = MARGIN + 2;
-constexpr int BOY_W    = 50;
+constexpr int BOY_W    = 60;
 constexpr int METER_X  = BOY_X + BOY_W + 6;
 constexpr int METER_W  = 70;
 constexpr int LOG_X    = METER_X + METER_W + 6;
 constexpr int LOG_W    = SCREEN_W - MARGIN - 4 - LOG_X;
 // Where the two right-hand columns end. Both are right-aligned, so these are
 // the pixel after the last one they may light.
-constexpr int LOG_RADS_R = LOG_X + 106;
+constexpr int LOG_TOK_R = LOG_X + 106;
 constexpr int LOG_CAPS_R = LOG_X + LOG_W;
 
 constexpr int FOOT_Y   = 219;   // footer text row; rule sits three above
@@ -127,7 +127,7 @@ void draw_chart(Canvas& c, const Provider& prov);
 
 // Tokens, abbreviated: "742", "56.3K", "98.1M", "5.3B". One decimal above a
 // thousand, never wider than six characters. A negative count is "--".
-void format_rads(int64_t tokens, char* out, size_t n);
+void format_tok(int64_t tokens, char* out, size_t n);
 
 // Whole dollars from the head of an OpenUsage text value -- "$4,512.30 - 4.8B"
 // is 4512. Cents are dropped, not rounded: the panel has no room for them and
@@ -142,29 +142,29 @@ void format_caps(int64_t dollars, char* out, size_t n);
 // does not go back that far.
 int64_t chart_total(const Provider& prov, int days);
 
-// TODAY / YESTERDAY / 30 DAYS as a RADS column and a CAPS column.
+// TODAY / YESTERDAY / 30 DAYS as a TOK column and a CAPS column.
 void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov);
 
-// Full deflection on the rad meter, in tokens per hour. A heavy day at the
+// Full deflection on the meter, in tokens per hour. A heavy day at the
 // pace the chart shows sits around a third of this. The needle pins here
 // rather than the scale rescaling: a gauge whose scale moves is not a gauge,
 // and the whole point is that the same deflection means the same thing today
 // as it did yesterday.
-constexpr int64_t RAD_FULL_SCALE = 60000000LL;
+constexpr int64_t TOK_FULL_SCALE = 60000000LL;
 
 // Where the arc turns bright, as a fraction of full scale.
-constexpr float RAD_DANGER_FRAC = 0.6f;
+constexpr float TOK_DANGER_FRAC = 0.6f;
 
 // A needle whose deflection is the measured burn rate. A negative rate means
 // the history is too short to say, and draws a dim needle at rest with no
 // figure beside it -- an honest "warming up" rather than a confident zero.
-void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour);
+void draw_tok_meter(Canvas& c, int x, int y, int w, int64_t tok_per_hour);
 
 // Radiation trefoil, drawn procedurally rather than as a bitmap -- at this size
 // a hand-pixelled one reads as a smudge.
 void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v);
 
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock, int64_t rads_per_hour = -1);
+                    int64_t now_ms, const char* clock, int64_t tok_per_hour = -1);
 
 }  // namespace cb
