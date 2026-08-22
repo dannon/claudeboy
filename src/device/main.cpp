@@ -2,6 +2,7 @@
 #include <TFT_eSPI.h>
 #include <string.h>
 #include "esp_heap_caps.h"
+#include "core/burn.h"
 #include "core/canvas.h"
 #include "core/clock.h"
 #include "core/crt.h"
@@ -42,6 +43,12 @@ static char g_body[6144];
 
 // No RTC, no NTP: the clock is seeded from each reply's serverTime.
 static cb::ServerClock g_clock;
+
+// Today's running token total, sampled once per successful poll. This is the
+// only history the board keeps, and the only thing on screen that is measured
+// here rather than reported by the server -- so it starts empty at boot and
+// the needle reads "--" until two polls a few minutes apart have landed.
+static cb::BurnHistory g_burn;
 
 // Matching the agent, which polls OpenUsage on the same period. Faster would
 // only buy latency the source does not have.
@@ -111,6 +118,17 @@ static void poll_snapshot() {
         // ahead -- the safe direction for an age. A reply with no serverTime
         // at all leaves the clock alone rather than throwing it back to 1970.
         if (r == cb::ParseResult::Ok && served > 0) cb::clock_seed(g_clock, served, millis());
+
+        // Sampled against the server's clock, not millis(): a board that
+        // reboots would otherwise look like it consumed a day's tokens in a
+        // second. store_accept() only swaps the snapshot on Ok, so anything
+        // else leaves the history alone rather than sampling stale numbers.
+        if (r == cb::ParseResult::Ok) {
+            const cb::UsageSnapshot& s = cb::store_current(g_store);
+            const int64_t at = cb::clock_now(g_clock, millis());
+            if (at > 0 && s.providers && s.provider_count > 0)
+                cb::burn_observe(g_burn, at, cb::chart_total(s.providers[0], 1));
+        }
     }
 
     // parse is a cb::ParseResult, or -1 when there was no body to parse. The
@@ -155,6 +173,7 @@ void setup() {
 
     cb::palette_build_rgb565_table(g_palette);
     cb::store_init(g_store, g_arena_a, g_arena_b);
+    cb::burn_init(g_burn);
 
     // Last, and deliberately: the framebuffer already holds its contiguous run
     // and the panel is lit, so the screen has something to show while the
@@ -190,7 +209,8 @@ void loop() {
     tft.setAddrWindow(0, 0, cb::SCREEN_W, cb::SCREEN_H);
     cb::render_frame(c, snap, 0, now, clock_text, fx,
                      g_frame, g_ring, sizeof g_ring,
-                     g_out_row, push_row, nullptr, &timing);
+                     g_out_row, push_row, nullptr, &timing,
+                     cb::burn_rate_per_hour(g_burn, now, cb::BURN_WINDOW_MS));
     tft.endWrite();
     const uint32_t total_us = micros() - t_frame_start;
 

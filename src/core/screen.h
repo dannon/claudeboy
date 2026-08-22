@@ -131,11 +131,26 @@ int64_t chart_total(const Provider& prov, int days);
 // TODAY / YESTERDAY / 30 DAYS as a RADS column and a CAPS column.
 void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov);
 
+// Full deflection on the rad meter, in tokens per hour. A heavy day at the
+// pace the chart shows sits around a third of this. The needle pins here
+// rather than the scale rescaling: a gauge whose scale moves is not a gauge,
+// and the whole point is that the same deflection means the same thing today
+// as it did yesterday.
+constexpr int64_t RAD_FULL_SCALE = 60000000LL;
+
+// Where the arc turns bright, as a fraction of full scale.
+constexpr float RAD_DANGER_FRAC = 0.6f;
+
+// A needle whose deflection is the measured burn rate. A negative rate means
+// the history is too short to say, and draws a dim needle at rest with no
+// figure beside it -- an honest "warming up" rather than a confident zero.
+void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour);
+
 // Radiation trefoil, drawn procedurally rather than as a bitmap -- at this size
 // a hand-pixelled one reads as a smudge.
 void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v);
 
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock);
+                    int64_t now_ms, const char* clock, int64_t rads_per_hour = -1);
 
 }  // namespace cb

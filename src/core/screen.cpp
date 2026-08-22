@@ -419,8 +419,58 @@ void draw_radiation(Canvas& c, int cx, int cy, int r, uint8_t v) {
     }
 }
 
+void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
+    const int cx = x + w / 2, cy = y + 44, r = 32;
+    static const float kPi = 3.14159265f;
+
+    const int title_w = text_width("RAD/HR", 1);
+    draw_text(c, cx - title_w / 2, y + 3, "RAD/HR", I_DIM, 1);
+
+    // The dial runs left to right: nothing at all on the left, full scale on
+    // the right, so a rising rate sweeps the way a rising needle should.
+    const int danger_deg = static_cast<int>((1.0f - RAD_DANGER_FRAC) * 180.0f);
+    for (int deg = 0; deg <= 180; deg++) {
+        const float a = deg * (kPi / 180.0f);
+        const float ca = cosf(a), sa = sinf(a);
+        const uint8_t v = deg <= danger_deg ? I_BRIGHT : I_RULE;
+        for (int rr = r - 1; rr <= r; rr++)
+            c.plot(cx + static_cast<int>(lroundf(rr * ca)),
+                   cy - static_cast<int>(lroundf(rr * sa)), v);
+    }
+
+    // Quarter ticks. 180 degrees is zero and 0 is full scale, so these read
+    // right to left as 0, 25, 50, 75, 100.
+    for (int deg = 0; deg <= 180; deg += 45) {
+        const float a = deg * (kPi / 180.0f);
+        const float ca = cosf(a), sa = sinf(a);
+        for (int rr = r - 6; rr < r - 1; rr++)
+            c.plot(cx + static_cast<int>(lroundf(rr * ca)),
+                   cy - static_cast<int>(lroundf(rr * sa)), I_NORMAL);
+    }
+
+    float frac = 0.0f;
+    if (rads_per_hour > 0) {
+        frac = static_cast<float>(rads_per_hour) / static_cast<float>(RAD_FULL_SCALE);
+        if (frac > 1.0f) frac = 1.0f;
+    }
+    const float na = (1.0f - frac) * kPi;
+    const float nca = cosf(na), nsa = sinf(na);
+    const uint8_t nv = rads_per_hour < 0 ? I_DIM : I_BRIGHT;
+    for (int t = 0; t <= r - 7; t++)
+        c.plot(cx + static_cast<int>(lroundf(t * nca)),
+               cy - static_cast<int>(lroundf(t * nsa)), nv);
+    for (int dy = -2; dy <= 2; dy++)
+        for (int dx = -2; dx <= 2; dx++)
+            if (dx * dx + dy * dy <= 4) c.plot(cx + dx, cy + dy, nv);
+
+    char rate[12];
+    format_rads(rads_per_hour, rate, sizeof rate);
+    draw_text(c, cx - text_width(rate, 1) / 2, y + 48, rate,
+              rads_per_hour < 0 ? I_DIM : I_NORMAL, 1);
+}
+
 void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
-                    int64_t now_ms, const char* clock) {
+                    int64_t now_ms, const char* clock, int64_t rads_per_hour) {
     draw_tabs(c, snap, provider_index, clock);
 
     const Freshness f = freshness_of(snap, now_ms);
@@ -445,6 +495,7 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     draw_chart(c, prov);
     c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
     draw_exposure_log(c, LOG_X, PANEL_Y + 6, LOG_W, prov);
+    draw_rad_meter(c, METER_X, PANEL_Y + 3, METER_W, rads_per_hour);
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
     if (f != Freshness::Fresh) dim_band(c, HERO_Y, PANEL_Y + PANEL_H - HERO_Y, I_STALE_SCALE);

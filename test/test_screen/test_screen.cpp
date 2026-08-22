@@ -417,6 +417,83 @@ void test_a_provider_with_no_text_still_draws_the_log(void) {
     TEST_ASSERT_TRUE(caps_no_text * 2 < caps_with_text);
 }
 
+// --- rad meter --------------------------------------------------------------
+
+// Where the needle's own pixels fall, clear of the arc and of the quarter
+// ticks: the needle reaches r-7 from the pivot and the innermost tick starts
+// at r-6, so these three points can only be lit by the needle.
+static const int MET_CX = cb::METER_X + cb::METER_W / 2;
+static const int MET_CY = cb::PANEL_Y + 3 + 44;
+
+void test_the_needle_deflects_with_the_rate(void) {
+    // Zero points left.
+    cb::Canvas c = mks();
+    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 0);
+    TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX - 21, MET_CY));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX, MET_CY - 20));
+    TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX + 22, MET_CY));
+
+    // Half scale points straight up.
+    cb::Canvas d = mks();
+    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE / 2);
+    TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, d.at(MET_CX, MET_CY - 20));
+    TEST_ASSERT_EQUAL_UINT8(0, d.at(MET_CX - 21, MET_CY));
+
+    // Full scale points right.
+    cb::Canvas e = mks();
+    cb::draw_rad_meter(e, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE);
+    TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, e.at(MET_CX + 22, MET_CY));
+    TEST_ASSERT_EQUAL_UINT8(0, e.at(MET_CX, MET_CY - 20));
+}
+
+void test_a_rate_past_full_scale_pins_rather_than_overshooting(void) {
+    // The dial itself: everything above the readout, so the comparison is of
+    // needles and not of how many digits each rate happens to print.
+    const int dial_h = MET_CY + 3 - (cb::PANEL_Y + 3);
+    cb::Canvas c = mks();
+    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE * 5);
+    TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX + 22, MET_CY));
+    const int over = lit_in(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h);
+
+    cb::Canvas d = mks();
+    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE);
+    // Five times over the scale draws exactly what full scale draws: the
+    // needle stops at the end of the dial instead of carrying on round it.
+    TEST_ASSERT_EQUAL_INT(lit_in(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h), over);
+    // But the figure beside it still says what the rate actually was.
+    char full[12], past[12];
+    cb::format_rads(cb::RAD_FULL_SCALE, full, sizeof full);
+    cb::format_rads(cb::RAD_FULL_SCALE * 5, past, sizeof past);
+    TEST_ASSERT_TRUE(strcmp(full, past) != 0);
+}
+
+void test_an_unknown_rate_rests_dim_and_shows_no_figure(void) {
+    cb::Canvas c = mks();
+    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, -1);
+    // At rest, like zero -- but dim, because "no reading yet" and "nothing
+    // being consumed" are different claims and must not look the same.
+    TEST_ASSERT_EQUAL_UINT8(cb::I_DIM, c.at(MET_CX - 21, MET_CY));
+
+    const int unknown_readout = lit_in(c, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
+    cb::Canvas d = mks();
+    cb::draw_rad_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 15000000);
+    const int known_readout = lit_in(d, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
+    TEST_ASSERT_TRUE(unknown_readout > 0);          // "--", not a blank
+    TEST_ASSERT_TRUE(unknown_readout * 2 < known_readout);
+}
+
+void test_the_meter_stays_in_its_third_of_the_panel(void) {
+    cb::Canvas c = mks();
+    cb::draw_rad_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::RAD_FULL_SCALE / 3);
+    TEST_ASSERT_TRUE(lit_in(c, cb::METER_X, cb::PANEL_Y, cb::METER_W, cb::PANEL_H) > 100);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::METER_X, cb::SCREEN_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::METER_X + cb::METER_W, 0,
+                                    cb::SCREEN_W - cb::METER_X - cb::METER_W, cb::SCREEN_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::SCREEN_W, cb::PANEL_Y));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::PANEL_Y + cb::PANEL_H, cb::SCREEN_W,
+                                    cb::SCREEN_H - cb::PANEL_Y - cb::PANEL_H));
+}
+
 // --- staleness --------------------------------------------------------------
 
 void test_freshness_boundaries(void) {
@@ -638,6 +715,10 @@ int main(int, char**) {
     RUN_TEST(test_chart_total_sums_the_tail);
     RUN_TEST(test_exposure_log_stays_in_the_panel);
     RUN_TEST(test_a_provider_with_no_text_still_draws_the_log);
+    RUN_TEST(test_the_needle_deflects_with_the_rate);
+    RUN_TEST(test_a_rate_past_full_scale_pins_rather_than_overshooting);
+    RUN_TEST(test_an_unknown_rate_rests_dim_and_shows_no_figure);
+    RUN_TEST(test_the_meter_stays_in_its_third_of_the_panel);
     RUN_TEST(test_freshness_boundaries);
     RUN_TEST(test_nothing_ever_fetched_is_no_signal);
     RUN_TEST(test_the_newest_provider_sets_the_state);
