@@ -366,7 +366,7 @@ void draw_exposure_log(Canvas& c, int x, int y, int w, const Provider& prov) {
     // CAPS is read from prov.text by position, which is the one assumption
     // here: OpenUsage sends today, yesterday, then the thirty-day total. A
     // text array too short for a row simply leaves that row's caps blank.
-    const int tok_r = x + 106, caps_r = x + w;
+    const int tok_r = x + w - LOG_CAPS_COL_W, caps_r = x + w;
 
     draw_text(c, tok_r - text_width("TOK", 1), y, "TOK", I_DIM, 1);
     draw_text(c, caps_r - text_width("CAPS", 1), y, "CAPS", I_DIM, 1);
@@ -537,8 +537,8 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     draw_windows(c, prov, now_ms);
     draw_chart(c, prov);
     c.rect(MARGIN, PANEL_Y, SCREEN_W - 2 * MARGIN, PANEL_H, I_RULE);
-    draw_exposure_log(c, LOG_X, PANEL_Y + 6, LOG_W, prov);
-    draw_tok_meter(c, METER_X, PANEL_Y + 3, METER_W, tok_per_hour);
+    draw_exposure_log(c, LOG_X, LOG_Y, LOG_W, prov);
+    draw_tok_meter(c, METER_X, METER_Y, METER_W, tok_per_hour);
     // Bottom-anchored: he is a figure standing behind the panel edge, and a
     // figure floating in the middle of a box reads as a sticker.
     draw_vault_boy(c, BOY_X, PANEL_Y + PANEL_H - VB_H - 1, boy_mood(prov, now_ms));

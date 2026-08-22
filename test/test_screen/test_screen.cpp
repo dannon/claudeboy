@@ -323,7 +323,7 @@ void test_format_tok_abbreviates_with_one_decimal(void) {
     cb::format_tok(-1, b, sizeof b);            TEST_ASSERT_EQUAL_STRING("--", b);
     // Nothing here may outgrow the column it is right-aligned in.
     cb::format_tok(999900000000LL, b, sizeof b);
-    TEST_ASSERT_TRUE(cb::text_width(b, 1) <= 106);
+    TEST_ASSERT_TRUE(cb::text_width(b, 1) <= cb::LOG_TOK_R - cb::LOG_X);
 }
 
 void test_parse_caps_reads_the_dollar_figure(void) {
@@ -375,7 +375,7 @@ void test_chart_total_sums_the_tail(void) {
 void test_exposure_log_stays_in_the_panel(void) {
     cb::Canvas c = mks();
     const cb::Provider& p = cb::fixture_snapshot().providers[0];
-    cb::draw_exposure_log(c, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W, p);
+    cb::draw_exposure_log(c, cb::LOG_X, cb::LOG_Y, cb::LOG_W, p);
     TEST_ASSERT_TRUE(lit_in(c, cb::LOG_X, cb::PANEL_Y, cb::LOG_W, cb::PANEL_H) > 200);
     // Nothing left of the log's column, nothing past the panel's right border,
     // and nothing above or below the panel.
@@ -393,8 +393,8 @@ void test_a_provider_with_no_text_still_draws_the_log(void) {
     // on its own, so it must still be there with the caps column blank.
     cb::Provider p = cb::fixture_snapshot().providers[0];
     p.text = nullptr; p.text_count = 0;
-    cb::draw_exposure_log(c, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W, p);
-    const int tok_r = cb::LOG_X + 106;
+    cb::draw_exposure_log(c, cb::LOG_X, cb::LOG_Y, cb::LOG_W, p);
+    const int tok_r = cb::LOG_TOK_R;
     const int caps_w = cb::LOG_X + cb::LOG_W - tok_r;
     // mks() hands out the one shared buffer, so read both counts off this
     // render before starting the next one.
@@ -402,7 +402,7 @@ void test_a_provider_with_no_text_still_draws_the_log(void) {
     const int caps_no_text = lit_in(c, tok_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
 
     cb::Canvas full = mks();
-    cb::draw_exposure_log(full, cb::LOG_X, cb::PANEL_Y + 6, cb::LOG_W,
+    cb::draw_exposure_log(full, cb::LOG_X, cb::LOG_Y, cb::LOG_W,
                           cb::fixture_snapshot().providers[0]);
     const int rads_with_text = lit_in(full, cb::LOG_X, cb::PANEL_Y, tok_r - cb::LOG_X, cb::PANEL_H);
     const int caps_with_text = lit_in(full, tok_r, cb::PANEL_Y, caps_w, cb::PANEL_H);
@@ -515,25 +515,25 @@ void test_burnout_is_the_only_caption_drawn_bright(void) {
 // ticks: the needle reaches r-7 from the pivot and the innermost tick starts
 // at r-6, so these three points can only be lit by the needle.
 static const int MET_CX = cb::METER_X + cb::METER_W / 2;
-static const int MET_CY = cb::PANEL_Y + 3 + 44;
+static const int MET_CY = cb::METER_Y + 44;
 
 void test_the_needle_deflects_with_the_rate(void) {
     // Zero points left.
     cb::Canvas c = mks();
-    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 0);
+    cb::draw_tok_meter(c, cb::METER_X, cb::METER_Y, cb::METER_W, 0);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX - 21, MET_CY));
     TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX, MET_CY - 20));
     TEST_ASSERT_EQUAL_UINT8(0, c.at(MET_CX + 22, MET_CY));
 
     // Half scale points straight up.
     cb::Canvas d = mks();
-    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE / 2);
+    cb::draw_tok_meter(d, cb::METER_X, cb::METER_Y, cb::METER_W, cb::TOK_FULL_SCALE / 2);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, d.at(MET_CX, MET_CY - 20));
     TEST_ASSERT_EQUAL_UINT8(0, d.at(MET_CX - 21, MET_CY));
 
     // Full scale points right.
     cb::Canvas e = mks();
-    cb::draw_tok_meter(e, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE);
+    cb::draw_tok_meter(e, cb::METER_X, cb::METER_Y, cb::METER_W, cb::TOK_FULL_SCALE);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, e.at(MET_CX + 22, MET_CY));
     TEST_ASSERT_EQUAL_UINT8(0, e.at(MET_CX, MET_CY - 20));
 }
@@ -541,17 +541,17 @@ void test_the_needle_deflects_with_the_rate(void) {
 void test_a_rate_past_full_scale_pins_rather_than_overshooting(void) {
     // The dial itself: everything above the readout, so the comparison is of
     // needles and not of how many digits each rate happens to print.
-    const int dial_h = MET_CY + 3 - (cb::PANEL_Y + 3);
+    const int dial_h = MET_CY + 3 - (cb::METER_Y);
     cb::Canvas c = mks();
-    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE * 5);
+    cb::draw_tok_meter(c, cb::METER_X, cb::METER_Y, cb::METER_W, cb::TOK_FULL_SCALE * 5);
     TEST_ASSERT_EQUAL_UINT8(cb::I_BRIGHT, c.at(MET_CX + 22, MET_CY));
-    const int over = lit_in(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h);
+    const int over = lit_in(c, cb::METER_X, cb::METER_Y, cb::METER_W, dial_h);
 
     cb::Canvas d = mks();
-    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE);
+    cb::draw_tok_meter(d, cb::METER_X, cb::METER_Y, cb::METER_W, cb::TOK_FULL_SCALE);
     // Five times over the scale draws exactly what full scale draws: the
     // needle stops at the end of the dial instead of carrying on round it.
-    TEST_ASSERT_EQUAL_INT(lit_in(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, dial_h), over);
+    TEST_ASSERT_EQUAL_INT(lit_in(d, cb::METER_X, cb::METER_Y, cb::METER_W, dial_h), over);
     // But the figure beside it still says what the rate actually was.
     char full[12], past[12];
     cb::format_tok(cb::TOK_FULL_SCALE, full, sizeof full);
@@ -561,22 +561,22 @@ void test_a_rate_past_full_scale_pins_rather_than_overshooting(void) {
 
 void test_an_unknown_rate_rests_dim_and_shows_no_figure(void) {
     cb::Canvas c = mks();
-    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, -1);
+    cb::draw_tok_meter(c, cb::METER_X, cb::METER_Y, cb::METER_W, -1);
     // At rest, like zero -- but dim, because "no reading yet" and "nothing
     // being consumed" are different claims and must not look the same.
     TEST_ASSERT_EQUAL_UINT8(cb::I_DIM, c.at(MET_CX - 21, MET_CY));
 
-    const int unknown_readout = lit_in(c, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
+    const int unknown_readout = lit_in(c, cb::METER_X, cb::METER_Y + 48, cb::METER_W, cb::FONT_H);
     cb::Canvas d = mks();
-    cb::draw_tok_meter(d, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, 15000000);
-    const int known_readout = lit_in(d, cb::METER_X, cb::PANEL_Y + 3 + 48, cb::METER_W, cb::FONT_H);
+    cb::draw_tok_meter(d, cb::METER_X, cb::METER_Y, cb::METER_W, 15000000);
+    const int known_readout = lit_in(d, cb::METER_X, cb::METER_Y + 48, cb::METER_W, cb::FONT_H);
     TEST_ASSERT_TRUE(unknown_readout > 0);          // "--", not a blank
     TEST_ASSERT_TRUE(unknown_readout * 2 < known_readout);
 }
 
 void test_the_meter_stays_in_its_third_of_the_panel(void) {
     cb::Canvas c = mks();
-    cb::draw_tok_meter(c, cb::METER_X, cb::PANEL_Y + 3, cb::METER_W, cb::TOK_FULL_SCALE / 3);
+    cb::draw_tok_meter(c, cb::METER_X, cb::METER_Y, cb::METER_W, cb::TOK_FULL_SCALE / 3);
     TEST_ASSERT_TRUE(lit_in(c, cb::METER_X, cb::PANEL_Y, cb::METER_W, cb::PANEL_H) > 100);
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::METER_X, cb::SCREEN_H));
     TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::METER_X + cb::METER_W, 0,

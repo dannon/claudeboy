@@ -25,27 +25,32 @@ constexpr int STRIP_Y  = 88;
 constexpr int STRIP_H  = 13;
 
 constexpr int CHART_Y  = 105;
-constexpr int CHART_H  = 44;
+constexpr int CHART_H  = 36;
 
 // The provider sends 31 days; we draw the tail. A month of bars at this width
 // is a grey smear that answers no question you actually have.
 constexpr int CHART_DAYS = 7;
 
 // The bottom panel: Vault Boy, the meter, and the exposure log share it.
-constexpr int PANEL_Y  = 153;
-constexpr int PANEL_H  = 60;
+constexpr int PANEL_Y  = 145;
+constexpr int PANEL_H  = 74;
 constexpr int BOY_X    = MARGIN + 2;
-constexpr int BOY_W    = 60;
+constexpr int BOY_W    = 84;
 constexpr int METER_X  = BOY_X + BOY_W + 6;
 constexpr int METER_W  = 70;
+constexpr int METER_Y  = PANEL_Y + 10;
 constexpr int LOG_X    = METER_X + METER_W + 6;
 constexpr int LOG_W    = SCREEN_W - MARGIN - 4 - LOG_X;
+constexpr int LOG_Y    = PANEL_Y + 14;
 // Where the two right-hand columns end. Both are right-aligned, so these are
-// the pixel after the last one they may light.
-constexpr int LOG_TOK_R = LOG_X + 106;
+// the pixel after the last one they may light. The tok column is placed from
+// the right edge rather than the left so the two stay clear of each other
+// when the log's width changes.
+constexpr int LOG_CAPS_COL_W = 54;
+constexpr int LOG_TOK_R  = LOG_X + LOG_W - LOG_CAPS_COL_W;
 constexpr int LOG_CAPS_R = LOG_X + LOG_W;
 
-constexpr int FOOT_Y   = 219;   // footer text row; rule sits three above
+constexpr int FOOT_Y   = 227;   // footer text row; rule sits three above
 
 // Intensity levels. Pace state is carried by brightness, not colour.
 constexpr uint8_t I_DIM    = 110;

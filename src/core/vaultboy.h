@@ -5,8 +5,8 @@
 
 namespace cb {
 
-constexpr int VB_W = 60;
-constexpr int VB_H = 52;
+constexpr int VB_W = 84;
+constexpr int VB_H = 70;
 
 // Thumb up, flat palm, thumb down. The gesture carries the reading from
 // across the room; the face is there for whoever walks over to look.
