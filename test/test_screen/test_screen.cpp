@@ -25,9 +25,9 @@ static const int64_t REF  = cb::FIXTURE_REFERENCE_MS;
 static const int64_t MIN  = 60LL * 1000;
 static const int64_t HOUR = 60 * MIN;
 
-// The band the numbers live in: gauge cells through the bottom of the chart.
-static const int DATA_Y = cb::CELL_Y;
-static const int DATA_H = cb::CHART_Y + cb::CHART_H - cb::CELL_Y;
+// The band the numbers live in: hero cards through the bottom of the panel.
+static const int DATA_Y = cb::HERO_Y;
+static const int DATA_H = cb::PANEL_Y + cb::PANEL_H - cb::HERO_Y;
 
 // The fixture provider with its fetch timestamp moved. Static, because the
 // snapshot handed back only points at it.
@@ -71,9 +71,23 @@ void test_format_clock_renders_hh_mm(void) {
 }
 
 void test_layout_fits_the_panel(void) {
-    TEST_ASSERT_TRUE(cb::CELL_Y + cb::CELL_H < cb::CHART_Y);
-    TEST_ASSERT_TRUE(cb::CHART_Y + cb::CHART_H < cb::FOOT_Y);
+    // Every band clears the next, top to bottom, with nothing overlapping.
+    TEST_ASSERT_TRUE(cb::TAB_H < cb::HERO_Y);
+    TEST_ASSERT_TRUE(cb::HERO_Y + cb::HERO_H < cb::STRIP_Y);
+    TEST_ASSERT_TRUE(cb::STRIP_Y + cb::STRIP_H < cb::CHART_Y);
+    TEST_ASSERT_TRUE(cb::CHART_Y + cb::CHART_H < cb::PANEL_Y);
+    TEST_ASSERT_TRUE(cb::PANEL_Y + cb::PANEL_H < cb::FOOT_Y - 4);
     TEST_ASSERT_TRUE(cb::FOOT_Y + cb::FONT_H < cb::SCREEN_H);
+}
+
+void test_window_badge_splits_on_a_day(void) {
+    // A session block refills before the next fight; a weekly ration does not.
+    TEST_ASSERT_EQUAL_STRING("AP", cb::window_badge(5LL * 3600 * 1000));
+    TEST_ASSERT_EQUAL_STRING("AP", cb::window_badge(24LL * 3600 * 1000));
+    TEST_ASSERT_EQUAL_STRING("HP", cb::window_badge(24LL * 3600 * 1000 + 1));
+    TEST_ASSERT_EQUAL_STRING("HP", cb::window_badge(168LL * 3600 * 1000));
+    // A line with no period at all is not a thing that refills.
+    TEST_ASSERT_EQUAL_STRING("HP", cb::window_badge(0));
 }
 
 void test_tabs_draw_in_the_strip_only(void) {
@@ -97,27 +111,46 @@ void test_format_duration_clamps_absurd_values(void) {
     TEST_ASSERT_TRUE(strlen(b) <= 7);
 }
 
-void test_cell_width_fits_three_and_four(void) {
-    const int usable = cb::SCREEN_W - 2 * cb::MARGIN;
-    for (int n = 1; n <= 4; n++) {
-        const int w = cb::cell_width(n);
-        TEST_ASSERT_TRUE(w > 0);
-        TEST_ASSERT_TRUE(n * w + (n - 1) * cb::CELL_GAP <= usable);
-    }
-    TEST_ASSERT_TRUE(cb::cell_width(4) < cb::cell_width(3));
-    // `usable` goes negative long before count does; the width must not.
-    TEST_ASSERT_TRUE(cb::cell_width(1000) >= 1);
-    TEST_ASSERT_TRUE(cb::cell_width(0) >= 1);
-    TEST_ASSERT_TRUE(cb::cell_width(-5) >= 1);
+void test_hero_width_fits_two_side_by_side(void) {
+    const int w = cb::hero_width();
+    TEST_ASSERT_TRUE(w > 0);
+    TEST_ASSERT_TRUE(2 * w + cb::HERO_GAP <= cb::SCREEN_W - 2 * cb::MARGIN);
 }
 
-void test_cells_draw_inside_their_band(void) {
+void test_windows_draw_inside_their_bands(void) {
     cb::Canvas c = mks();
     const cb::Provider& p = cb::fixture_snapshot().providers[0];
-    cb::draw_cells(c, p, cb::FIXTURE_REFERENCE_MS);
-    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H) > 200);
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::SCREEN_W, cb::CELL_Y - 1));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y + cb::CELL_H + 1, cb::SCREEN_W, 20));
+    cb::draw_windows(c, p, cb::FIXTURE_REFERENCE_MS);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H) > 200);
+    // The fixture's third window lands on the strip row.
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::STRIP_Y, cb::SCREEN_W, cb::STRIP_H) > 40);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, 0, cb::SCREEN_W, cb::HERO_Y - 1));
+    // Nothing spills into the gutter between the bands, or onto the chart.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y + cb::HERO_H, cb::SCREEN_W,
+                                    cb::STRIP_Y - cb::HERO_Y - cb::HERO_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::STRIP_Y + cb::STRIP_H, cb::SCREEN_W,
+                                    cb::CHART_Y - cb::STRIP_Y - cb::STRIP_H));
+}
+
+void test_a_window_that_does_not_fit_is_counted_not_dropped(void) {
+    cb::Canvas c = mks();
+    const cb::ProgressLine five[] = {
+        {"SESSION", 21, 100, REF + HOUR, 5LL * HOUR},
+        {"WEEKLY",  58, 100, REF + 40 * HOUR, 168LL * HOUR},
+        {"FABLE",   17, 100, REF + 40 * HOUR, 168LL * HOUR},
+        {"EXTRA1",  10, 100, REF + 40 * HOUR, 168LL * HOUR},
+        {"EXTRA2",  10, 100, REF + 40 * HOUR, 168LL * HOUR},
+    };
+    cb::Provider prov{"x", "X", "", REF, five, 5, nullptr, 0, nullptr, 0};
+    cb::draw_windows(c, prov, REF);
+    // Two heroes and one strip is all the layout holds; the two that did not
+    // fit are announced as "+2" at the right of the strip row rather than
+    // silently vanishing.
+    const int tag_w = cb::text_width("+2", 1);
+    TEST_ASSERT_TRUE(lit_in(c, cb::SCREEN_W - cb::MARGIN - tag_w, cb::STRIP_Y,
+                            tag_w, cb::STRIP_H) > 4);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::STRIP_Y + cb::STRIP_H, cb::SCREEN_W,
+                                    cb::CHART_Y - cb::STRIP_Y - cb::STRIP_H));
 }
 
 void test_unknown_state_draws_no_verdict(void) {
@@ -127,26 +160,45 @@ void test_unknown_state_draws_no_verdict(void) {
                            5LL * 3600 * 1000};
     cb::Pace pc = cb::compute_pace(fresh, cb::FIXTURE_REFERENCE_MS);
     TEST_ASSERT_EQUAL(cb::PaceState::Unknown, pc.state);
-    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, 100, fresh, pc);
-    // Verdict row stays blank when we have no verdict to give.
-    const int verdict_y = cb::CELL_Y + 48;
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + 3, verdict_y, 90, cb::FONT_H));
+    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, cb::hero_width(), fresh, pc);
+    // No verdict word, because we have no verdict to give. The countdown is
+    // a separate fact and still true, so it keeps its place on the right.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + 5, cb::HERO_Y + 58,
+                                    cb::text_width("SURPLUS", 1), cb::FONT_H));
+    TEST_ASSERT_TRUE(lit_in(c, cb::MARGIN + cb::hero_width() / 2, cb::HERO_Y + 58,
+                            cb::hero_width() / 2 - 5, cb::FONT_H) > 4);
 }
 
 void test_gauge_bar_length_tracks_remaining(void) {
+    const int w = cb::hero_width();
     cb::Canvas full = mks();
-    cb::ProgressLine a{"A", 0, 100, cb::FIXTURE_REFERENCE_MS + 3600000, 7200000};
-    cb::draw_gauge_cell(full, cb::MARGIN, cb::CELL_Y, 100, a,
-                        cb::compute_pace(a, cb::FIXTURE_REFERENCE_MS));
-    const int wide = lit_in(full, cb::MARGIN, cb::CELL_Y + 36, 100, 8);
+    cb::ProgressLine a{"A", 0, 100, REF + 3600000, 7200000};
+    cb::draw_hero(full, cb::MARGIN, cb::HERO_Y, w, a, cb::compute_pace(a, REF));
+    const int wide = lit_in(full, cb::MARGIN, cb::HERO_Y + 48, w, 7);
 
     cb::Canvas low = mks();
-    cb::ProgressLine b{"B", 90, 100, cb::FIXTURE_REFERENCE_MS + 3600000, 7200000};
-    cb::draw_gauge_cell(low, cb::MARGIN, cb::CELL_Y, 100, b,
-                        cb::compute_pace(b, cb::FIXTURE_REFERENCE_MS));
-    const int narrow = lit_in(low, cb::MARGIN, cb::CELL_Y + 36, 100, 8);
+    cb::ProgressLine b{"B", 90, 100, REF + 3600000, 7200000};
+    cb::draw_hero(low, cb::MARGIN, cb::HERO_Y, w, b, cb::compute_pace(b, REF));
+    const int narrow = lit_in(low, cb::MARGIN, cb::HERO_Y + 48, w, 7);
 
     TEST_ASSERT_TRUE(wide > narrow);
+}
+
+void test_strip_bar_length_tracks_remaining(void) {
+    const int w = cb::SCREEN_W - 2 * cb::MARGIN;
+    cb::Canvas full = mks();
+    cb::ProgressLine a{"A", 0, 100, REF + 3600000, 7200000};
+    cb::draw_strip(full, cb::MARGIN, cb::STRIP_Y, w, a, cb::compute_pace(a, REF));
+    const int wide = lit_in(full, cb::MARGIN, cb::STRIP_Y + 3, w, 6);
+
+    cb::Canvas low = mks();
+    cb::ProgressLine b{"B", 90, 100, REF + 3600000, 7200000};
+    cb::draw_strip(low, cb::MARGIN, cb::STRIP_Y, w, b, cb::compute_pace(b, REF));
+    const int narrow = lit_in(low, cb::MARGIN, cb::STRIP_Y + 3, w, 6);
+
+    TEST_ASSERT_TRUE(wide > narrow);
+    // Both still say which window they are and what percent is left.
+    TEST_ASSERT_TRUE(lit_in(low, cb::MARGIN, cb::STRIP_Y, 3 * cb::FONT_ADV, cb::STRIP_H) > 4);
 }
 
 void test_chart_draws_in_its_band(void) {
@@ -181,7 +233,8 @@ void test_render_ambient_fills_all_bands(void) {
     cb::Canvas c = mks();
     cb::render_ambient(c, cb::fixture_snapshot(), 0, cb::FIXTURE_REFERENCE_MS, "14:44");
     TEST_ASSERT_TRUE(lit_in(c, 0, 0, cb::SCREEN_W, cb::TAB_H) > 20);
-    TEST_ASSERT_TRUE(lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H) > 200);
+    TEST_ASSERT_TRUE(lit_in(c, 0, cb::STRIP_Y, cb::SCREEN_W, cb::STRIP_H) > 40);
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::CHART_Y, cb::SCREEN_W, cb::CHART_H) > 100);
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 12) > 20);
 }
@@ -189,51 +242,55 @@ void test_render_ambient_fills_all_bands(void) {
 void test_render_ambient_with_bad_index_is_safe(void) {
     cb::Canvas c = mks();
     cb::render_ambient(c, cb::fixture_snapshot(), 99, cb::FIXTURE_REFERENCE_MS, "14:44");
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H));
 }
 
-void test_verdict_fits_a_narrow_cell(void) {
+void test_verdict_and_countdown_stay_inside_the_hero(void) {
     cb::Canvas c = mks();
-    const int w = cb::cell_width(4);
-    // 99d23h reset -- "BURNOUT 99d23h" is 14 chars, 83px at scale 1, wider
-    // than a 4-cell interior (68px). used==limit forces Burnout regardless
-    // of elapsed_frac.
+    const int w = cb::hero_width();
+    // used == limit forces Burnout regardless of elapsed_frac, so this also
+    // exercises the trefoil, which is drawn nearest the right border.
     cb::ProgressLine line{"SESSION", 100, 100,
-                          cb::FIXTURE_REFERENCE_MS + 8636400000LL,
-                          200LL * 86400 * 1000};
-    cb::Pace p = cb::compute_pace(line, cb::FIXTURE_REFERENCE_MS);
+                          REF + 8636400000LL, 200LL * 86400 * 1000};
+    cb::Pace p = cb::compute_pace(line, REF);
     TEST_ASSERT_EQUAL(cb::PaceState::Burnout, p.state);
-    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, w, line, p);
-    // Nothing should bleed past this cell's right border into whatever sits
-    // next to it.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + w, cb::CELL_Y, 20, cb::CELL_H));
+    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, w, line, p);
+    // Nothing bleeds past the right border into the card next to it.
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + w, cb::HERO_Y, cb::HERO_GAP, cb::HERO_H));
+    // The trefoil is there.
+    TEST_ASSERT_TRUE(lit_in(c, cb::MARGIN + w - 27, cb::HERO_Y + 22, 21, 21) > 40);
 }
 
 void test_invalid_pace_draws_no_gauge(void) {
-    const int w = 100, bar_x = cb::MARGIN + 3, bar_w = w - 6;
+    const int w = cb::hero_width(), bar_x = cb::MARGIN + 5, bar_w = w - 10;
     // limit 0: nothing to be a percentage of.
-    cb::ProgressLine broken{"WEEKLY", 12, 0, cb::FIXTURE_REFERENCE_MS + 3600000, 7200000};
-    cb::Pace p = cb::compute_pace(broken, cb::FIXTURE_REFERENCE_MS);
+    cb::ProgressLine broken{"WEEKLY", 12, 0, REF + 3600000, 7200000};
+    cb::Pace p = cb::compute_pace(broken, REF);
     TEST_ASSERT_FALSE(p.valid);
 
     cb::Canvas c = mks();
-    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, w, broken, p);
+    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, w, broken, p);
     // An empty drain bar would read as a fully exhausted window, so there is
     // no bar, no pace tick and no verdict.
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 31, bar_w, 4));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 36, bar_w, 8));
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 48, bar_w, cb::FONT_H));
-    // The cell still says which line it is, and shows a placeholder reading.
-    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::CELL_Y + 3, bar_w, cb::FONT_H) > 10);
-    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::CELL_Y + 13, bar_w, 2 * cb::FONT_H) > 4);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 44, bar_w, 3));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 47, bar_w, 9));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::HERO_Y + 58, bar_w, cb::FONT_H));
+    // The card still says which line it is, and shows a placeholder reading.
+    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::HERO_Y + 5, bar_w, 2 * cb::FONT_H) > 10);
+    TEST_ASSERT_TRUE(lit_in(c, bar_x, cb::HERO_Y + 22, bar_w, 3 * cb::FONT_H) > 4);
 
     // Same for a line with no period at all.
-    cb::ProgressLine no_period{"WEEKLY", 12, 100, cb::FIXTURE_REFERENCE_MS + 3600000, 0};
-    cb::Pace q = cb::compute_pace(no_period, cb::FIXTURE_REFERENCE_MS);
+    cb::ProgressLine no_period{"WEEKLY", 12, 100, REF + 3600000, 0};
+    cb::Pace q = cb::compute_pace(no_period, REF);
     TEST_ASSERT_FALSE(q.valid);
     cb::Canvas d = mks();
-    cb::draw_gauge_cell(d, cb::MARGIN, cb::CELL_Y, w, no_period, q);
-    TEST_ASSERT_EQUAL_INT(0, lit_in(d, bar_x, cb::CELL_Y + 36, bar_w, 8));
+    cb::draw_hero(d, cb::MARGIN, cb::HERO_Y, w, no_period, q);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(d, bar_x, cb::HERO_Y + 47, bar_w, 9));
+    // A strip with nothing to plot draws no bar either.
+    cb::Canvas e = mks();
+    cb::draw_strip(e, cb::MARGIN, cb::STRIP_Y, cb::SCREEN_W - 2 * cb::MARGIN, no_period, q);
+    TEST_ASSERT_EQUAL_INT(0, lit_in(e, cb::MARGIN + 12 * cb::FONT_ADV, cb::STRIP_Y,
+                                    100, cb::STRIP_H));
 }
 
 void test_unknown_state_draws_no_tick(void) {
@@ -243,10 +300,10 @@ void test_unknown_state_draws_no_tick(void) {
                            5LL * 3600 * 1000};
     cb::Pace pc = cb::compute_pace(fresh, cb::FIXTURE_REFERENCE_MS);
     TEST_ASSERT_EQUAL(cb::PaceState::Unknown, pc.state);
-    cb::draw_gauge_cell(c, cb::MARGIN, cb::CELL_Y, 100, fresh, pc);
+    cb::draw_hero(c, cb::MARGIN, cb::HERO_Y, cb::hero_width(), fresh, pc);
     // Pace tick stays undrawn when there's no pace to show.
-    const int bar_x = cb::MARGIN + 3, bar_w = 100 - 6;
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, bar_x, cb::CELL_Y + 31, bar_w, 4));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, cb::MARGIN + 5, cb::HERO_Y + 44,
+                                    cb::hero_width() - 10, 3));
 }
 
 // --- staleness --------------------------------------------------------------
@@ -389,7 +446,7 @@ void test_the_annotation_is_not_dimmed_with_what_it_annotates(void) {
 void test_no_signal_shows_no_numbers_at_all(void) {
     cb::Canvas c = mks();
     cb::render_ambient(c, with_fetched_at(0), 0, REF, "14:44");
-    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::CELL_Y, cb::SCREEN_W, cb::CELL_H));
+    TEST_ASSERT_EQUAL_INT(0, lit_in(c, 0, cb::HERO_Y, cb::SCREEN_W, cb::HERO_H));
     // Chart bars grow from the floor of the chart band, starting at the left
     // margin. Sampled only across the leftmost bars: the NO SIGNAL banner is
     // centred in the data region, which the chart band is part of, so a
@@ -449,16 +506,19 @@ int main(int, char**) {
     RUN_TEST(test_layout_fits_the_panel);
     RUN_TEST(test_tabs_draw_in_the_strip_only);
     RUN_TEST(test_footer_draws_at_the_bottom);
-    RUN_TEST(test_cell_width_fits_three_and_four);
-    RUN_TEST(test_cells_draw_inside_their_band);
+    RUN_TEST(test_window_badge_splits_on_a_day);
+    RUN_TEST(test_hero_width_fits_two_side_by_side);
+    RUN_TEST(test_windows_draw_inside_their_bands);
+    RUN_TEST(test_a_window_that_does_not_fit_is_counted_not_dropped);
     RUN_TEST(test_unknown_state_draws_no_verdict);
     RUN_TEST(test_gauge_bar_length_tracks_remaining);
+    RUN_TEST(test_strip_bar_length_tracks_remaining);
     RUN_TEST(test_chart_draws_in_its_band);
     RUN_TEST(test_tallest_bar_is_the_peak_day);
     RUN_TEST(test_empty_chart_does_not_crash);
     RUN_TEST(test_render_ambient_fills_all_bands);
     RUN_TEST(test_render_ambient_with_bad_index_is_safe);
-    RUN_TEST(test_verdict_fits_a_narrow_cell);
+    RUN_TEST(test_verdict_and_countdown_stay_inside_the_hero);
     RUN_TEST(test_invalid_pace_draws_no_gauge);
     RUN_TEST(test_unknown_state_draws_no_tick);
     RUN_TEST(test_freshness_boundaries);
