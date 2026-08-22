@@ -34,10 +34,10 @@ constexpr int CHART_DAYS = 7;
 // The bottom panel: Vault Boy, the rad meter, and the exposure log share it.
 constexpr int PANEL_Y  = 153;
 constexpr int PANEL_H  = 60;
-constexpr int BOY_X    = MARGIN + 4;
-constexpr int BOY_W    = 42;
+constexpr int BOY_X    = MARGIN + 2;
+constexpr int BOY_W    = 50;
 constexpr int METER_X  = BOY_X + BOY_W + 6;
-constexpr int METER_W  = 76;
+constexpr int METER_W  = 70;
 constexpr int LOG_X    = METER_X + METER_W + 6;
 constexpr int LOG_W    = SCREEN_W - MARGIN - 4 - LOG_X;
 // Where the two right-hand columns end. Both are right-aligned, so these are
@@ -52,6 +52,8 @@ constexpr uint8_t I_DIM    = 110;
 constexpr uint8_t I_NORMAL = 200;
 constexpr uint8_t I_BRIGHT = 255;
 constexpr uint8_t I_RULE   = 150;
+// Large filled areas only -- see vaultboy.cpp for why this sits so low.
+constexpr uint8_t I_WASH   = 45;
 
 // How much of its brightness the data band keeps once it is no longer fresh,
 // out of 255. Old numbers must stay readable -- the point is to keep showing

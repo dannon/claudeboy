@@ -463,7 +463,7 @@ const char* vault_caption(Freshness f, PaceState worst) {
 }
 
 void draw_rad_meter(Canvas& c, int x, int y, int w, int64_t rads_per_hour) {
-    const int cx = x + w / 2, cy = y + 44, r = 32;
+    const int cx = x + w / 2, cy = y + 44, r = 30;
     static const float kPi = 3.14159265f;
 
     const int title_w = text_width("RAD/HR", 1);
