@@ -8,6 +8,24 @@ Pace compute_pace(const ProgressLine& line, int64_t now_ms) {
     p.valid = false;
 
     if (line.period_ms <= 0 || line.limit <= 0) return p;
+
+    // No reset time at all: the window has not started. Reporting a rate here
+    // would be inventing one -- with resets_at_ms of 0 the clamp below reads the
+    // window as fully elapsed and calls an untouched budget SURPLUS 0m, which
+    // is worse than saying nothing.
+    // Exactly zero, not <= 0: zero is what the parser writes when the key is
+    // absent, whereas a negative value is a real timestamp relative to a small
+    // epoch and still wants the ordinary clamping path below.
+    if (line.resets_at_ms == 0) {
+        p.valid = true;
+        p.state = PaceState::Ready;
+        int32_t u = line.used;
+        if (u < 0) u = 0;
+        if (u > line.limit) u = line.limit;
+        p.remaining_frac = 1.0f - static_cast<float>(u) / static_cast<float>(line.limit);
+        return p;
+    }
+
     p.valid = true;
 
     int64_t reset_in = line.resets_at_ms - now_ms;

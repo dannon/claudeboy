@@ -6,7 +6,11 @@ namespace cb {
 constexpr int SCREEN_W = 320;
 constexpr int SCREEN_H = 240;
 
-enum class PaceState : uint8_t { Surplus, OnPace, Burnout, Unknown };
+// Ready means the window exists but has not started -- OpenUsage omits resetsAt
+// for a session block with no usage yet, since the five hours begin on first
+// use. Distinct from Unknown, which means too little of a RUNNING window has
+// elapsed for the rate to mean anything.
+enum class PaceState : uint8_t { Surplus, OnPace, Burnout, Unknown, Ready };
 
 struct ProgressLine {
     const char* label;

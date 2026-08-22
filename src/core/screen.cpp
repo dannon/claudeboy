@@ -102,6 +102,7 @@ const char* verdict_text(PaceState s) {
         case PaceState::Surplus: return "SURPLUS";
         case PaceState::OnPace:  return "ON PACE";
         case PaceState::Burnout: return "BURNOUT";
+        case PaceState::Ready:   return "READY";
         default:                 return nullptr;   // no verdict worth giving
     }
 }
@@ -111,6 +112,7 @@ uint8_t verdict_intensity(PaceState s) {
         case PaceState::Surplus: return I_DIM;
         case PaceState::OnPace:  return I_NORMAL;
         case PaceState::Burnout: return I_BRIGHT;
+        case PaceState::Ready:   return I_DIM;
         default:                 return I_DIM;
     }
 }
@@ -171,7 +173,7 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
 
     // Pace tick: where remaining ought to sit if consumption were on budget.
     const int bar_x = x + 3, bar_w = w - 6;
-    if (p.state != PaceState::Unknown) {
+    if (p.state != PaceState::Unknown && p.state != PaceState::Ready) {
         const float on_pace_remaining = 1.0f - p.elapsed_frac;
         int tx = bar_x + static_cast<int>(on_pace_remaining * (bar_w - 1));
         if (tx < bar_x) tx = bar_x;
@@ -191,13 +193,19 @@ void draw_gauge_cell(Canvas& c, int x, int y, int w,
     const char* v = verdict_text(p.state);
     if (v) {
         char row[24];
-        char dur[12];
-        format_duration(p.reset_in_ms, dur, sizeof dur);
-        snprintf(row, sizeof row, "%s %s", v, dur);
-        // A 4-cell layout is narrower than the verdict-plus-duration text can
-        // fit; drop the duration and keep the verdict, which is the part
-        // read at a glance.
-        if (text_width(row, 1) > w - 6) snprintf(row, sizeof row, "%s", v);
+        if (p.state == PaceState::Ready) {
+            // No window running, so there is no countdown to show. "READY 0m"
+            // would be as misleading as the SURPLUS 0m this replaces.
+            snprintf(row, sizeof row, "%s", v);
+        } else {
+            char dur[12];
+            format_duration(p.reset_in_ms, dur, sizeof dur);
+            snprintf(row, sizeof row, "%s %s", v, dur);
+            // A 4-cell layout is narrower than the verdict-plus-duration text
+            // can fit; drop the duration and keep the verdict, which is the
+            // part read at a glance.
+            if (text_width(row, 1) > w - 6) snprintf(row, sizeof row, "%s", v);
+        }
         draw_text(c, x + 3, y + 48, row, verdict_intensity(p.state), 1);
     }
 }
