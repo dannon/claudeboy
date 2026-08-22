@@ -14,7 +14,9 @@ bool view_tap(ViewState& v, int x, int y, int provider_count) {
         return true;
     }
 
-    v.page = v.page == Page::Stat ? Page::Data : Page::Stat;
+    // Round the pages rather than toggling: there are three now, and a tap
+    // that only ever flipped between two would strand the third.
+    v.page = static_cast<Page>((static_cast<int>(v.page) + 1) % PAGE_COUNT);
     return true;
 }
 

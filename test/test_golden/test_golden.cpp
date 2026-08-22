@@ -66,9 +66,14 @@ void test_the_data_page_matches_its_golden(void) {
     check_page(cb::Page::Data, "goldens/ambient-data.raw", "out/golden-actual-data.raw");
 }
 
+void test_the_all_page_matches_its_golden(void) {
+    check_page(cb::Page::All, "goldens/ambient-all.raw", "out/golden-actual-all.raw");
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_the_stat_page_matches_its_golden);
     RUN_TEST(test_the_data_page_matches_its_golden);
+    RUN_TEST(test_the_all_page_matches_its_golden);
     return UNITY_END();
 }

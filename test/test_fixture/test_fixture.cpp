@@ -65,10 +65,17 @@ void test_rolled_window_still_has_time_left_on_it(void) {
 void test_the_snapshot_stays_pinned_to_the_capture(void) {
     const cb::UsageSnapshot& s = cb::fixture_snapshot();
     TEST_ASSERT_EQUAL_INT64(REF, s.server_time_ms);
-    TEST_ASSERT_EQUAL_INT(1, s.provider_count);
+    TEST_ASSERT_EQUAL_INT(3, s.provider_count);
     TEST_ASSERT_EQUAL_INT(3, s.providers[0].progress_count);
     TEST_ASSERT_EQUAL_INT(31, s.providers[0].chart_count);
     TEST_ASSERT_EQUAL_INT64(REF + 45 * HOUR / 60, s.providers[0].progress[0].resets_at_ms);
+    // Antigravity is in the fixture for its shape, not its numbers: four
+    // windows, no text and no chart. If it ever grows either, the "+N" tag and
+    // the NO DAILY HISTORY message stop being covered by the golden.
+    TEST_ASSERT_EQUAL_STRING("ANTIGRAVITY", s.providers[2].display_name);
+    TEST_ASSERT_EQUAL_INT(4, s.providers[2].progress_count);
+    TEST_ASSERT_EQUAL_INT(0, s.providers[2].text_count);
+    TEST_ASSERT_EQUAL_INT(0, s.providers[2].chart_count);
 }
 
 int main(int, char**) {

@@ -317,6 +317,59 @@ void draw_chart(Canvas& c, const Provider& prov) {
     }
 }
 
+void draw_provider_block(Canvas& c, int y, const Provider& prov, int64_t now_ms) {
+    // Name and plan on their own line, so the window rows below start at the
+    // same x for every provider and the bars line up down the page.
+    draw_text(c, MARGIN, y, prov.display_name, I_BRIGHT, 1);
+    if (prov.plan && prov.plan[0])
+        draw_text(c, MARGIN + text_width(prov.display_name, 1) + 8, y, prov.plan, I_DIM, 1);
+
+    const int n = prov.progress && prov.progress_count > 0
+                      ? (prov.progress_count < 2 ? prov.progress_count : 2)
+                      : 0;
+    // Antigravity reports four. Two is all this page shows on purpose, but
+    // dropping the rest in silence is not this codebase's habit -- say how
+    // many are behind the summary, on the name line where there is room.
+    const int hidden = prov.progress_count - n;
+    if (hidden > 0) {
+        char tag[8];
+        snprintf(tag, sizeof tag, "+%d", hidden);
+        draw_text(c, SCREEN_W - MARGIN - text_width(tag, 1), y, tag, I_DIM, 1);
+    }
+    // A provider that reported no windows at all is a fact worth showing.
+    // Leaving its block blank reads as a rendering fault rather than as news.
+    if (n == 0) {
+        draw_text(c, MARGIN, y + ALL_ROW_DY, "NO WINDOWS REPORTED", I_DIM, 1);
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        const ProgressLine& line = prov.progress[i];
+        const Pace p = compute_pace(line, now_ms);
+        const int ry = y + ALL_ROW_DY + i * ALL_ROW_H;
+
+        draw_text(c, MARGIN, ry, window_badge(line.period_ms), I_DIM, 1);
+
+        char pct[8];
+        if (p.valid) snprintf(pct, sizeof pct, "%d%%",
+                              static_cast<int>(p.remaining_frac * 100.0f + 0.5f));
+        else         snprintf(pct, sizeof pct, "--");
+        draw_text(c, ALL_PCT_R - text_width(pct, 1), ry, pct, p.valid ? I_NORMAL : I_DIM, 1);
+
+        if (p.valid) {
+            c.rect(ALL_BAR_X, ry + 1, ALL_BAR_W, ALL_BAR_H, I_RULE);
+            int fill_w = static_cast<int>(p.remaining_frac * (ALL_BAR_W - 2));
+            if (fill_w < 0) fill_w = 0;
+            if (fill_w > ALL_BAR_W - 2) fill_w = ALL_BAR_W - 2;
+            if (fill_w > 0) c.fill(ALL_BAR_X + 1, ry + 2, fill_w, ALL_BAR_H - 2, I_NORMAL);
+        }
+
+        const char* v = verdict_text(p.state);
+        if (v) draw_text(c, SCREEN_W - MARGIN - text_width(v, 1), ry, v,
+                         verdict_intensity(p.state), 1);
+    }
+}
+
 void format_tok(int64_t v, char* out, size_t n) {
     if (!out || n == 0) return;
     if (v < 0) { snprintf(out, n, "--"); return; }
@@ -538,6 +591,21 @@ void draw_stat_page(Canvas& c, const Provider& prov, int64_t now_ms) {
     draw_windows(c, prov, now_ms);
 }
 
+void draw_all_page(Canvas& c, const UsageSnapshot& snap, int64_t now_ms) {
+    const int n = snap.provider_count < ALL_ROWS ? snap.provider_count : ALL_ROWS;
+    for (int i = 0; i < n; i++)
+        draw_provider_block(c, ALL_Y + i * ALL_PITCH, snap.providers[i], now_ms);
+    // The provider list is server-side and can grow past what fits. Say how
+    // many rather than pretend it only ever sends three.
+    const int hidden = snap.provider_count - n;
+    if (hidden > 0) {
+        char tag[16];
+        snprintf(tag, sizeof tag, "+%d MORE", hidden);
+        draw_text(c, SCREEN_W - MARGIN - text_width(tag, 1),
+                  ALL_Y + ALL_ROWS * ALL_PITCH + 6, tag, I_DIM, 1);
+    }
+}
+
 void draw_data_page(Canvas& c, const Provider& prov, int64_t tok_per_hour) {
     draw_chart(c, prov);
     draw_exposure_log(c, LOG_X, LOG_Y, LOG_W, prov);
@@ -569,8 +637,9 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     if (!snap.providers || provider_index < 0 || provider_index >= snap.provider_count) return;
 
     const Provider& prov = snap.providers[provider_index];
-    if (page == Page::Data) draw_data_page(c, prov, tok_per_hour);
-    else                    draw_stat_page(c, prov, now_ms);
+    if (page == Page::All)       draw_all_page(c, snap, now_ms);
+    else if (page == Page::Data) draw_data_page(c, prov, tok_per_hour);
+    else                         draw_stat_page(c, prov, now_ms);
 
     // Knock the numbers back before the footer goes on, so the annotation
     // saying how old they are ends up brighter than the numbers themselves.
@@ -580,12 +649,27 @@ void render_ambient(Canvas& c, const UsageSnapshot& snap, int provider_index,
     // terminal makes of them. On the right, the day's token count when there
     // is nothing wrong to report -- the one number worth carrying on both
     // pages, and the reason the unit is called TOK at all.
+    // The All page's footer is about the whole snapshot, not the provider the
+    // tab row happens to have selected -- a caption reading SURPLUS over three
+    // blocks one of which is burning would be a lie.
     char tok[12] = "WORKING";
-    if (!annotated) {
-        const int64_t today = chart_total(prov, 1);
-        if (today >= 0) format_tok(today, tok, sizeof tok);
+    int64_t today = 0;
+    bool any_today = false;
+    PaceState worst = PaceState::Unknown;
+    if (page == Page::All) {
+        int best = -1;
+        for (int i = 0; i < snap.provider_count; i++) {
+            const PaceState s = worst_pace(snap.providers[i], now_ms);
+            if (pace_severity(s) > best) { best = pace_severity(s); worst = s; }
+            const int64_t t = chart_total(snap.providers[i], 1);
+            if (t >= 0) { today += t; any_today = true; }
+        }
+    } else {
+        worst = worst_pace(prov, now_ms);
+        const int64_t t = chart_total(prov, 1);
+        if (t >= 0) { today = t; any_today = true; }
     }
-    const PaceState worst = worst_pace(prov, now_ms);
+    if (!annotated && any_today) format_tok(today, tok, sizeof tok);
     draw_footer(c, vault_caption(f, worst), annotated ? note : tok,
                 worst == PaceState::Burnout && f == Freshness::Fresh ? I_BRIGHT : I_DIM);
 }

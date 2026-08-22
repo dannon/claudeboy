@@ -38,7 +38,8 @@ static int run_png() {
     cb::Canvas c(g_shown, cb::SCREEN_W, cb::SCREEN_H);
     struct Shot { cb::Page page; const char* path; };
     static const Shot kShots[] = {{cb::Page::Stat, "out/ambient.png"},
-                                  {cb::Page::Data, "out/ambient-data.png"}};
+                                  {cb::Page::Data, "out/ambient-data.png"},
+                                  {cb::Page::All,  "out/ambient-all.png"}};
     for (const Shot& s : kShots) {
         render_reference(c, cb::EffectParams::defaults(), s.page);
         if (!cbhost::write_png_from_canvas(s.path, c)) {
@@ -59,6 +60,7 @@ static int run_bless() {
     static const Shot kShots[] = {
         {cb::Page::Stat, "goldens/ambient-claude.raw", "goldens/ambient-claude.png"},
         {cb::Page::Data, "goldens/ambient-data.raw",   "goldens/ambient-data.png"},
+        {cb::Page::All,  "goldens/ambient-all.raw",    "goldens/ambient-all.png"},
     };
     for (const Shot& s : kShots) {
         render_reference(c, cb::EffectParams::defaults(), s.page);

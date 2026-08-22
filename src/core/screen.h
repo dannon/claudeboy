@@ -8,11 +8,15 @@
 
 namespace cb {
 
-// Two pages, swapped by a tap. One screen carrying everything at once was
+// Three pages, cycled by a tap. One screen carrying everything at once was
 // legible but read as a dashboard; a Pip-Boy is sparse, and the numbers worth
 // reading from the sofa are not the numbers worth reading up close.
-enum class Page : uint8_t { Stat, Data };
-constexpr int PAGE_COUNT = 2;
+//
+// Stat and Data are about the selected provider; All is about every provider,
+// and exists because cycling the tab row to answer "how is Codex doing" is a
+// bad trade when the answer is two bars long.
+enum class Page : uint8_t { Stat, Data, All };
+constexpr int PAGE_COUNT = 3;
 
 // --- chrome, on both pages --------------------------------------------------
 constexpr int MARGIN = 6;
@@ -78,6 +82,25 @@ constexpr int LOG_CAPS_R = LOG_X + LOG_W;
 constexpr int METER_X = 190;
 constexpr int METER_W = SCREEN_W - MARGIN - METER_X;
 constexpr int METER_Y = PANEL_Y + 2;
+
+// --- ALL -------------------------------------------------------------------
+// One block per provider: its name, then the session and the weekly ration as
+// a badge, a percent, a bar and a verdict. Only those two windows -- this page
+// answers "is anything on fire" and a provider's third window has never been
+// the answer to that.
+constexpr int ALL_Y     = 22;
+constexpr int ALL_PITCH = 60;
+constexpr int ALL_ROWS  = 3;    // providers drawn before the rest become a tag
+constexpr int ALL_ROW_DY = 15;  // the first window row, from the block's top
+constexpr int ALL_ROW_H  = 16;  // and the pitch from it to the second
+// The percent column is right-aligned here and the bar starts after it, so
+// every bar on the page begins at the same x whatever the names are doing.
+constexpr int ALL_PCT_R  = 66;
+constexpr int ALL_BAR_X  = 74;
+constexpr int ALL_BAR_H  = 9;
+// Kept clear on the right for the verdict word; BURNOUT is the widest at 48.
+constexpr int ALL_VERDICT_W = 52;
+constexpr int ALL_BAR_W = SCREEN_W - MARGIN - ALL_VERDICT_W - 8 - ALL_BAR_X;
 
 // Intensity levels. Pace state is carried by brightness, not colour.
 constexpr uint8_t I_DIM    = 110;
@@ -160,6 +183,10 @@ void draw_strip(Canvas& c, int x, int y, int w, const ProgressLine& line, const 
 void draw_windows(Canvas& c, const Provider& prov, int64_t now_ms);
 
 void draw_chart(Canvas& c, const Provider& prov);
+
+// One provider's block on the All page: name and plan, then its session and
+// weekly windows. `y` is the top of the block.
+void draw_provider_block(Canvas& c, int y, const Provider& prov, int64_t now_ms);
 
 // Tokens, abbreviated: "742", "56.3K", "98.1M", "5.3B". One decimal above a
 // thousand, never wider than six characters. A negative count is "--".

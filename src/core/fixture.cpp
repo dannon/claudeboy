@@ -33,6 +33,36 @@ const ChartPoint kClaudeChart[] = {
 };
 constexpr int kClaudeChartCount = sizeof kClaudeChart / sizeof kClaudeChart[0];
 
+// The other two providers the agent actually reports. Codex is the ordinary
+// case; Antigravity is the awkward one and is here precisely for that -- four
+// progress lines, no text and no chart at all, so the "+N" tag, the empty
+// exposure log and the NO DAILY HISTORY message are all exercised by the
+// preview and the golden rather than only in hand-built test fixtures.
+const ProgressLine kCodexProgress[] = {
+    {"SESSION", 44, 100, REF + 2 * HOUR + 10 * HOUR / 60,  5   * HOUR},
+    {"WEEKLY",  81, 100, REF + 96 * HOUR + 40 * HOUR / 60, 168 * HOUR},
+};
+
+const TextLine kCodexText[] = {
+    {"TODAY",     "$12.04 - 18.7M"},
+    {"YESTERDAY", "$31.88 - 44.2M"},
+    {"30 DAYS",   "$688 - 900.4M"},
+};
+
+const ChartPoint kCodexChart[] = {
+    {"Aug 15", 51203344}, {"Aug 16", 12908771}, {"Aug 17", 33871020},
+    {"Aug 18", 8112447},  {"Aug 19", 61044901}, {"Aug 20", 44219836},
+    {"Aug 21", 18702155},
+};
+constexpr int kCodexChartCount = sizeof kCodexChart / sizeof kCodexChart[0];
+
+const ProgressLine kAntigravityProgress[] = {
+    {"SESSION",  9,  100, REF + 4 * HOUR + 5 * HOUR / 60,   5   * HOUR},
+    {"WEEKLY",   23, 100, REF + 130 * HOUR,                 168 * HOUR},
+    {"DAILY",    62, 100, REF + 9 * HOUR,                   24  * HOUR},
+    {"MONTHLY",  11, 100, REF + 400 * HOUR,                 720 * HOUR},
+};
+
 // fetched_at is the reference instant itself, so anything rendering the
 // fixture at FIXTURE_REFERENCE_MS -- the host preview, the golden, the tests --
 // sees fresh data and no staleness chrome. A zero here would silently turn
@@ -42,9 +72,17 @@ const Provider kProviders[] = {
      kClaudeProgress, 3,
      kClaudeText,     3,
      kClaudeChart,    kClaudeChartCount},
+    {"codex", "CODEX", "PRO", REF,
+     kCodexProgress, 2,
+     kCodexText,     3,
+     kCodexChart,    kCodexChartCount},
+    {"antigravity", "ANTIGRAVITY", "", REF,
+     kAntigravityProgress, 4,
+     nullptr, 0,
+     nullptr, 0},
 };
 
-const UsageSnapshot kSnapshot = {kProviders, 1, REF};
+const UsageSnapshot kSnapshot = {kProviders, 3, REF};
 
 }  // namespace
 

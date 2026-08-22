@@ -117,7 +117,9 @@ void test_zero_limit_is_invalid(void) {
 
 void test_fixture_reproduces_captured_states(void) {
     const cb::UsageSnapshot& s = cb::fixture_snapshot();
-    TEST_ASSERT_EQUAL_INT(1, s.provider_count);
+    TEST_ASSERT_EQUAL_INT(3, s.provider_count);
+    // This test is about the Claude capture specifically -- the numbers below
+    // are the ones that were on screen when it was taken.
     const cb::Provider& p = s.providers[0];
     TEST_ASSERT_EQUAL_INT(3, p.progress_count);
 

@@ -289,6 +289,62 @@ void test_the_data_page_fills_its_bands(void) {
     TEST_ASSERT_TRUE(lit_in(c, 0, cb::FOOT_Y - 4, cb::SCREEN_W, 12) > 20);
 }
 
+void test_the_all_page_shows_every_provider(void) {
+    cb::Canvas c = mks();
+    const cb::UsageSnapshot& snap = cb::fixture_snapshot();
+    TEST_ASSERT_EQUAL_INT(3, snap.provider_count);
+    cb::render_ambient(c, snap, 0, REF, "14:44", -1, cb::Page::All);
+    // One block per provider, each with something in it. Sampling each block
+    // separately is the point: a page that drew the selected provider three
+    // times would pass a whole-page pixel count.
+    for (int i = 0; i < 3; i++)
+        TEST_ASSERT_TRUE(lit_in(c, 0, cb::ALL_Y + i * cb::ALL_PITCH,
+                                cb::SCREEN_W, cb::ALL_ROW_DY + 2 * cb::ALL_ROW_H) > 150);
+    // and the blocks are not the same block: the names differ, so the leading
+    // run of each name line differs too.
+    const int name_h = cb::FONT_H;
+    const int a = lit_in(c, cb::MARGIN, cb::ALL_Y, 120, name_h);
+    const int b = lit_in(c, cb::MARGIN, cb::ALL_Y + cb::ALL_PITCH, 120, name_h);
+    const int d = lit_in(c, cb::MARGIN, cb::ALL_Y + 2 * cb::ALL_PITCH, 120, name_h);
+    TEST_ASSERT_TRUE(a != b || b != d);
+}
+
+void test_a_provider_with_no_windows_says_so(void) {
+    cb::Canvas c = mks();
+    cb::Provider bare{"x", "X", "", REF, nullptr, 0, nullptr, 0, nullptr, 0};
+    cb::draw_provider_block(c, cb::ALL_Y, bare, REF);
+    // A blank block reads as a rendering fault rather than as news, so there
+    // is a line of text where the bars would be.
+    TEST_ASSERT_TRUE(lit_in(c, cb::MARGIN, cb::ALL_Y + cb::ALL_ROW_DY,
+                            cb::SCREEN_W - 2 * cb::MARGIN, cb::FONT_H) > 40);
+}
+
+void test_the_all_page_footer_reports_the_worst_provider(void) {
+    // Claude comfortable, Codex burning. A footer taking its verdict from the
+    // selected provider alone would say everything is fine.
+    const cb::ProgressLine easy[]  = {{"SESSION", 1,   100, REF + 4 * HOUR, 5 * HOUR}};
+    const cb::ProgressLine burning[] = {{"SESSION", 100, 100, REF + 4 * HOUR, 5 * HOUR}};
+    cb::Provider p[2] = {
+        {"a", "A", "", REF, easy,    1, nullptr, 0, nullptr, 0},
+        {"b", "B", "", REF, burning, 1, nullptr, 0, nullptr, 0},
+    };
+    cb::UsageSnapshot snap{p, 2, REF, 0};
+
+    cb::Canvas c = mks();
+    cb::render_ambient(c, snap, 0, REF, "14:44", -1, cb::Page::All);
+    const long all = sum_in(c, cb::MARGIN, cb::FOOT_Y, cb::SCREEN_W / 2, cb::FONT_H);
+
+    // The same snapshot on the Stat page, showing provider 0, is entitled to
+    // the sunnier caption -- that page really is only about provider 0.
+    cb::Canvas d = mks();
+    cb::render_ambient(d, snap, 0, REF, "14:44", -1, cb::Page::Stat);
+    const long one = sum_in(d, cb::MARGIN, cb::FOOT_Y, cb::SCREEN_W / 2, cb::FONT_H);
+
+    TEST_ASSERT_TRUE(all != one);
+    TEST_ASSERT_EQUAL_STRING("DOSE EXCEEDS SAFE LIMITS",
+                             cb::vault_caption(cb::Freshness::Fresh, cb::PaceState::Burnout));
+}
+
 void test_the_two_pages_are_different_screens(void) {
     // Both pages fill the same band, so no region is empty on one and full on
     // the other. What matters is that a tap changes the screen rather than
@@ -879,6 +935,9 @@ int main(int, char**) {
     RUN_TEST(test_the_stat_page_fills_its_bands);
     RUN_TEST(test_the_data_page_fills_its_bands);
     RUN_TEST(test_the_two_pages_are_different_screens);
+    RUN_TEST(test_the_all_page_shows_every_provider);
+    RUN_TEST(test_a_provider_with_no_windows_says_so);
+    RUN_TEST(test_the_all_page_footer_reports_the_worst_provider);
     RUN_TEST(test_render_ambient_with_bad_index_is_safe);
     RUN_TEST(test_verdict_and_countdown_stay_inside_the_hero);
     RUN_TEST(test_invalid_pace_draws_no_gauge);

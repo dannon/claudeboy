@@ -9,14 +9,31 @@ void test_the_board_boots_on_the_stat_page(void) {
     TEST_ASSERT_EQUAL(cb::Page::Stat, v.page);
 }
 
-void test_a_tap_below_the_tabs_swaps_the_page(void) {
+void test_a_tap_below_the_tabs_cycles_the_pages(void) {
     cb::ViewState v = fresh();
     TEST_ASSERT_TRUE(cb::view_tap(v, 160, 120, 3));
     TEST_ASSERT_EQUAL(cb::Page::Data, v.page);
-    TEST_ASSERT_EQUAL_INT(0, v.provider);
-    // and back again -- there are two pages, so one gesture has to do both
+    TEST_ASSERT_TRUE(cb::view_tap(v, 160, 120, 3));
+    TEST_ASSERT_EQUAL(cb::Page::All, v.page);
+    // Round, not back and forth: a toggle would strand the third page.
     TEST_ASSERT_TRUE(cb::view_tap(v, 160, 120, 3));
     TEST_ASSERT_EQUAL(cb::Page::Stat, v.page);
+    TEST_ASSERT_EQUAL_INT(0, v.provider);
+}
+
+void test_every_page_is_reachable_by_tapping(void) {
+    // Whatever PAGE_COUNT becomes, that many taps has to come back round to
+    // where it started and have visited each page exactly once on the way.
+    cb::ViewState v = fresh();
+    bool seen[cb::PAGE_COUNT] = {};
+    for (int i = 0; i < cb::PAGE_COUNT; i++) {
+        const int idx = static_cast<int>(v.page);
+        TEST_ASSERT_TRUE(idx >= 0 && idx < cb::PAGE_COUNT);
+        TEST_ASSERT_FALSE(seen[idx]);
+        seen[idx] = true;
+        cb::view_tap(v, 160, 120, 3);
+    }
+    TEST_ASSERT_EQUAL(cb::VIEW_INITIAL.page, v.page);
 }
 
 void test_the_page_swaps_from_anywhere_below_the_band(void) {
@@ -25,7 +42,7 @@ void test_the_page_swaps_from_anywhere_below_the_band(void) {
     for (const auto& s : spots) {
         cb::ViewState v = fresh();
         TEST_ASSERT_TRUE(cb::view_tap(v, s[0], s[1], 3));
-        TEST_ASSERT_EQUAL(cb::Page::Data, v.page);
+        TEST_ASSERT_EQUAL(cb::Page::Data, v.page);   // one step on from Stat
     }
 }
 
@@ -88,7 +105,8 @@ void test_a_shrinking_provider_list_does_not_leave_us_pointing_past_it(void) {
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_the_board_boots_on_the_stat_page);
-    RUN_TEST(test_a_tap_below_the_tabs_swaps_the_page);
+    RUN_TEST(test_a_tap_below_the_tabs_cycles_the_pages);
+    RUN_TEST(test_every_page_is_reachable_by_tapping);
     RUN_TEST(test_the_page_swaps_from_anywhere_below_the_band);
     RUN_TEST(test_a_tap_on_the_tabs_cycles_providers);
     RUN_TEST(test_the_tab_band_is_deeper_than_the_tab_row);
