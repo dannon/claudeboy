@@ -18,11 +18,14 @@ SPIClass g_spi(HSPI);
 // second.
 constexpr uint32_t SPI_HZ = 2000000;
 
-// Raw counts at the edges of the glass. Measured on this board by tapping the
-// corners and reading the RAW line the poll prints; the controller's usable
-// span is well inside its 12-bit range and differs from panel to panel.
-constexpr int RAW_X_MIN = 300, RAW_X_MAX = 3800;
-constexpr int RAW_Y_MIN = 300, RAW_Y_MAX = 3800;
+// Raw counts at the edges of the glass, measured on this board: tap the four
+// corners, feed the RAW figures the poll prints to tools/solve_touch.py, paste
+// what it prints here. The usable span sits well inside the controller's
+// 12-bit range and is not symmetric, which is why guessing it did not work --
+// 300..3800 on both axes piled every tap into the top-left eighth of the
+// panel. These differ from panel to panel; redo them if the glass is swapped.
+constexpr int RAW_X_MIN = 898, RAW_X_MAX = 3368;
+constexpr int RAW_Y_MIN = 424, RAW_Y_MAX = 3510;
 
 // The controller's axes against the display at rotation 3. Its X runs down
 // the display's height and its Y across the width, both backwards.
