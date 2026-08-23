@@ -1,75 +1,85 @@
 #!/usr/bin/env python3
-"""Rasterise Ubuntu Mono Bold into the two bitmap fonts in src/core/.
+"""Convert the two Spleen BDFs into the bitmap fonts in src/core/.
 
-Replaces the Adafruit GLCD 5x7 that tools/extract_font.py pulls out of
-TFT_eSPI. That font is thin and generic; the Pip-Boy look wants something
-tall and squared.
+  small  spleen-6x12   -> 6x12 cell, 6px advance, one uint8_t per row
+  big    spleen-12x24  -> 12x24 cell, 12px advance, one uint16_t per row
 
-TWO fonts, cut at the two sizes actually drawn, rather than one cut small and
-doubled. Doubling turns every glyph pixel into a 2x2 block, which on the panel
-reads as exactly what it is -- a low-resolution font stretched -- and it was
-the last thing on the screen that still looked wrong.
+This used to rasterise Ubuntu Mono Bold with PIL. Downscaling a TTF to an
+eight-row cap height means thresholding antialiased edges, and the glyphs come
+out lopsided -- 'A' landed as ..##... / ..###.. / ..#.#.. , which is a
+different shape on each side of its own apex. On the panel that reads as
+blurry, and it is not the bloom: it is the letterforms. Spleen is drawn bead
+by bead at these exact sizes, so the forms are symmetric and deliberate, the
+stems are a whole pixel, and the counters stay open under bloom instead of
+filling in. It is also BSD-2, and reading BDF needs no dependencies at all.
 
-  small  13px source -> 7x11 cell, 7px advance, one uint8_t per row
-  big    25px source -> 13x20 cell, 13px advance, one uint16_t per row
+Seven was the ceiling on the small advance because the footer draws a
+26-character caption and a 16-character annotation on one 308px line; six
+clears it with room to spare.
 
-Seven is the ceiling for the small advance: the footer draws a 26-character
-caption and a 16-character staleness annotation on one 308px line, so
-42*ADV + 6 <= 308. Thirteen is what the big one needs to keep "AP SESSION" and
-a right-aligned "100%" clear of each other inside HERO_W. 25px rather than 26
-for the big one: 26 draws ink into all thirteen columns, so adjacent glyphs
-touch and the advance has to grow to 14 to make a gap.
+Both faces keep their full BDF cell rather than being trimmed to the cap
+height. The rows above the capitals are not empty -- brackets, braces and
+quotes live up there, and the tab row draws [CLAUDE] in the small face.
 
-Emits ROW-major glyphs, bit 0 = leftmost. The header this replaced was
-column-major with one byte per column, which caps a cell at eight rows.
+Emits ROW-major glyphs, bit 0 = leftmost. BDF packs rows MSB-first and
+left-aligned to a byte boundary, so every row is reversed on the way in.
 
-Run:  uv run --with pillow python tools/make_font.py
+Run:  python3 tools/make_font.py
 """
-from PIL import Image, ImageDraw, ImageFont
+import os
 
-PATH = "/Users/dannon/Library/Fonts/UbuntuMono-Bold.ttf"
+HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts')
 FIRST, LAST = 32, 126
 
-def raster(px, w, h):
-    f = ImageFont.truetype(PATH, px)
-    # The y offset that puts capitals flush with the top of the cell. Measured
-    # rather than taken from the font's ascent, which includes accent room no
-    # glyph here uses and would waste two rows at the top of every cell.
-    probe = Image.new('L', (px * 4, px * 4), 0)
-    ImageDraw.Draw(probe).text((5, 5), "AXZ0", font=f, fill=255)
-    top = probe.point(lambda v: 255 if v > 110 else 0).getbbox()[1] - 5
-    out = []
-    for code in range(FIRST, LAST + 1):
-        img = Image.new('L', (w + px, h + px * 2), 0)
-        ImageDraw.Draw(img).text((0, -top), chr(code), font=f, fill=255)
-        bm = img.point(lambda v: 255 if v > 110 else 0)
-        glyph = []
-        for y in range(h):
-            bits = 0
-            for x in range(w):
-                if bm.getpixel((x, y)): bits |= (1 << x)
-            glyph.append(bits)
-        out.append((code, glyph))
-    return out
+def read_bdf(path):
+    fw = fh = fox = foy = 0
+    glyphs, enc, bbx, bits = {}, None, None, None
+    for line in open(path, encoding='latin-1'):
+        t = line.split()
+        if not t: continue
+        if t[0] == 'FONTBOUNDINGBOX':
+            fw, fh, fox, foy = (int(v) for v in t[1:5])
+        elif t[0] == 'ENCODING': enc = int(t[1])
+        elif t[0] == 'BBX': bbx = tuple(int(v) for v in t[1:5])
+        elif t[0] == 'BITMAP': bits = []
+        elif t[0] == 'ENDCHAR':
+            if enc is not None and FIRST <= enc <= LAST and bbx is not None:
+                w, h, xo, yo = bbx
+                cell = [0] * fh
+                for i, hexrow in enumerate(bits):
+                    v = int(hexrow, 16) >> ((w + 7) // 8 * 8 - w)   # drop the pad
+                    rev = 0
+                    for b in range(w):
+                        if v >> (w - 1 - b) & 1: rev |= 1 << b
+                    # BDF measures y upward from the baseline; rows run top-down.
+                    row = (fh + foy) - (yo + h) + i
+                    if 0 <= row < fh: cell[row] |= rev << (xo - fox)
+                glyphs[enc] = cell
+            enc = bbx = bits = None
+        elif bits is not None: bits.append(t[0])
+    missing = [c for c in range(FIRST, LAST + 1) if c not in glyphs]
+    if missing:
+        raise SystemExit(f"{path}: no glyph for {missing}")
+    return fw, fh, glyphs
 
-def emit(path, rows, name, ctype, digits, w, h, px):
+def emit(path, src, name, ctype, digits):
+    w, h, glyphs = read_bdf(os.path.join(HERE, src))
     out = ["// Generated by tools/make_font.py -- do not edit.",
-           f"// Ubuntu Mono Bold rasterised at {px}px: {w}x{h} cell, row-major, bit 0 = leftmost.",
+           f"// {src}: {w}x{h} cell, row-major, bit 0 = leftmost.",
            "#pragma once", "#include <stdint.h>", "namespace cb {"]
     if name == "FONT_DATA":
         out += [f"constexpr char FONT_FIRST = {FIRST};", f"constexpr char FONT_LAST = {LAST};"]
     out.append(f"constexpr {ctype} {name}[] = {{")
-    for code, g in rows:
+    for code in range(FIRST, LAST + 1):
         # The character is quoted and the code point printed after it: a bare
         # trailing backslash in a // comment is a line continuation, and it ate
         # the next glyph's row silently -- ']' rendered as '^' for a while.
-        out.append("    " + ", ".join(f"0x{b:0{digits}X}" for b in g) + f",   // '{chr(code)}' {code}")
+        out.append("    " + ", ".join(f"0x{b:0{digits}X}" for b in glyphs[code])
+                   + f",   // '{chr(code)}' {code}")
     out += ["};", "}  // namespace cb", ""]
     open(path, 'w').write("\n".join(out))
-    used = max((y for _, g in rows for y, b in enumerate(g) if b), default=-1) + 1
-    cols = max((x for _, g in rows for b in g for x in range(w) if b >> x & 1), default=-1) + 1
-    print(f"{path}: {len(rows)} cells, {len(rows) * h * (digits // 2)} bytes, "
-          f"rows used {used}/{h}, cols used {cols}/{w}")
+    print(f"{path}: {LAST - FIRST + 1} cells, {w}x{h}, "
+          f"{(LAST - FIRST + 1) * h * (digits // 2)} bytes")
 
-emit('src/core/font_data.h', raster(13, 7, 11), 'FONT_DATA', 'uint8_t', 2, 7, 11, 13)
-emit('src/core/font_big_data.h', raster(25, 13, 20), 'FONT_BIG_DATA', 'uint16_t', 4, 13, 20, 25)
+emit('src/core/font_data.h', 'spleen-6x12.bdf', 'FONT_DATA', 'uint8_t', 2)
+emit('src/core/font_big_data.h', 'spleen-12x24.bdf', 'FONT_BIG_DATA', 'uint16_t', 4)

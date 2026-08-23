@@ -194,21 +194,25 @@ void test_the_big_font_holds_every_printable_glyph(void) {
 }
 
 void test_the_big_face_is_a_raster_not_the_small_one_doubled(void) {
-    // If these ever coincide, someone has quietly gone back to scaling, which
-    // is the thing the second raster exists to stop.
-    TEST_ASSERT_TRUE(cb::BIG_ADV != 2 * cb::FONT_ADV);
-    TEST_ASSERT_TRUE(cb::BIG_H != 2 * cb::FONT_H);
+    // The big face exists so that nothing on screen is a scaled-up small
+    // glyph. Compared as bitmaps rather than as metrics: the two cells can
+    // coincide in size by chance -- 12x24 happens to be exactly twice 6x12 --
+    // and it is the shapes that have to differ.
+    static uint8_t doubled[64 * 16];
+    cb::Canvas d = mkwide();
+    cb::draw_char(d, 0, 0, 'A', 255, 2);
+    memcpy(doubled, wide, sizeof doubled);
 
-    cb::Canvas doubled = mkwide();
-    cb::draw_char(doubled, 0, 0, 'A', 255, 2);
-    int a = 0;
-    for (int i = 0; i < 64 * 16; i++) if (wide[i]) a++;
-    cb::Canvas native = mkwide();
-    cb::draw_char_big(native, 0, 0, 'A', 255);
-    int b = 0;
-    for (int i = 0; i < 64 * 16; i++) if (wide[i]) b++;
-    TEST_ASSERT_TRUE(a > 0 && b > 0);
-    TEST_ASSERT_TRUE(a != b);
+    cb::Canvas n = mkwide();
+    cb::draw_char_big(n, 0, 0, 'A', 255);
+
+    int lit_doubled = 0, lit_native = 0;
+    for (int i = 0; i < 64 * 16; i++) {
+        if (doubled[i]) lit_doubled++;
+        if (wide[i]) lit_native++;
+    }
+    TEST_ASSERT_TRUE(lit_doubled > 0 && lit_native > 0);
+    TEST_ASSERT_TRUE(memcmp(doubled, wide, sizeof doubled) != 0);
 }
 
 void test_big_text_width_advances_one_cell_per_char(void) {
@@ -223,13 +227,26 @@ void test_the_brackets_still_mirror_each_other(void) {
     // A raw backslash at the end of a // comment is a line continuation, and
     // it once swallowed the ']' row out of the generated header: every glyph
     // past '\\' shifted down one and ']' drew as '^'. Mirroring is the
-    // cheapest check that the array is still in register with ASCII.
+    // cheapest check that the array is still in register with ASCII, and the
+    // tab row draws [CLAUDE], so these two are worth being right.
+    //
+    // The axis is found from the pair's own ink rather than fixed at the
+    // middle of the cell. Where a glyph sits inside its cell is the font
+    // designer's business, and it moved the first time the faces changed.
     const uint8_t* open  = &cb::FONT_DATA[('[' - cb::FONT_FIRST) * cb::FONT_H];
     const uint8_t* close = &cb::FONT_DATA[(']' - cb::FONT_FIRST) * cb::FONT_H];
+    int lo = cb::FONT_W, hi = -1;
+    for (int r = 0; r < cb::FONT_H; r++)
+        for (int b = 0; b < cb::FONT_W; b++)
+            if ((open[r] | close[r]) & (1u << b)) {
+                if (b < lo) lo = b;
+                if (b > hi) hi = b;
+            }
+    TEST_ASSERT_TRUE(hi > lo);
     for (int r = 0; r < cb::FONT_H; r++) {
         uint8_t flipped = 0;
         for (int b = 0; b < cb::FONT_W; b++)
-            if (open[r] & (1u << b)) flipped |= static_cast<uint8_t>(1u << (cb::FONT_W - 2 - b));
+            if (open[r] & (1u << b)) flipped |= static_cast<uint8_t>(1u << (lo + hi - b));
         TEST_ASSERT_EQUAL_UINT8(flipped, close[r]);
     }
 }

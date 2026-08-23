@@ -4,23 +4,28 @@
 
 namespace cb {
 
-// Two rasters of Ubuntu Mono Bold, cut at the two sizes actually drawn -- see
-// tools/make_font.py. The big one is not the small one doubled: doubling turns
-// every glyph pixel into a 2x2 block, and on the panel that reads as exactly
-// what it is, a low-resolution font stretched.
+// Spleen, at the two sizes actually drawn -- see tools/make_font.py. Two
+// separate faces rather than one scaled: doubling turns every glyph pixel into
+// a 2x2 block, which on the panel reads as exactly what it is.
 //
-// The small cell is seven wide because the footer has to fit a 26-character
-// caption and a 16-character annotation on one 308px line, and 42*ADV + 6 <=
-// 308 caps the advance there. Glyph ink stops one column short of the cell in
-// both fonts, so that column is the inter-character gap and the advance
-// equals the cell.
-constexpr int FONT_W   = 7;
-constexpr int FONT_H   = 11;
-constexpr int FONT_ADV = 7;
+// Both are drawn bead by bead at these sizes rather than rasterised down from
+// an outline font, which is what the two before them were. A downscaled TTF
+// has to threshold antialiased edges, and the glyphs come out lopsided and
+// with their counters closing under bloom -- that is what read as blurry, and
+// it was the letterforms rather than the CRT effects.
+//
+// The small advance has a ceiling of seven: the footer draws a 26-character
+// caption and a 16-character annotation on one 308px line, so 42*ADV + 6 <=
+// 308. Six clears it comfortably. The inter-character gap is the designer's,
+// built into where each glyph sits in its cell, so the advance is the whole
+// cell and text_width() subtracts only the trailing one.
+constexpr int FONT_W   = 6;
+constexpr int FONT_H   = 12;
+constexpr int FONT_ADV = 6;
 
-constexpr int BIG_W   = 13;
-constexpr int BIG_H   = 20;
-constexpr int BIG_ADV = 13;
+constexpr int BIG_W   = 12;
+constexpr int BIG_H   = 24;
+constexpr int BIG_ADV = 12;
 
 // x,y is the top-left of the glyph cell. scale >= 1 replicates pixels.
 // Characters outside ASCII 32..126 draw nothing.
