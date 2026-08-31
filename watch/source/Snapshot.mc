@@ -174,12 +174,24 @@ module Model {
     }
 
     function paceText(p as Number, line as Line, nowSec as Number) as String {
+        return paceWord(p, shortDuration(line.resetInSec(nowSec)));
+    }
+
+    function paceWord(p as Number, d as String) as String {
         if (p == PACE_READY) { return "READY"; }
-        if (p == PACE_UNKNOWN) { return ""; }
-        var d = shortDuration(line.resetInSec(nowSec));
+        // Too early in the window to judge a pace, but the countdown is real.
+        if (p == PACE_UNKNOWN) { return "RESET " + d; }
         if (p == PACE_BURNOUT) { return "BURN " + d; }
         if (p == PACE_SURPLUS) { return "SPARE " + d; }
         return "ON " + d;
+    }
+
+    // Leading unit only -- for the glance, whose lines end at the subscreen
+    // bezel and cannot take "SPARE 3h31m" but read fine as "SPARE 3h".
+    function coarseDuration(sec as Number) as String {
+        if (sec >= 86400) { return (sec / 86400).toString() + "d"; }
+        if (sec >= 3600) { return (sec / 3600).toString() + "h"; }
+        return (sec / 60).toString() + "m";
     }
 
     function shortDuration(sec as Number) as String {
@@ -193,11 +205,15 @@ module Model {
 
     // Same four states as the board. Never blank the screen -- dim and show the age.
     function stalenessText(snap as Snapshot or Null) as String {
+        return stalenessWith(snap, false);
+    }
+
+    function stalenessWith(snap as Snapshot or Null, coarse as Boolean) as String {
         if (snap == null) { return "NO SIGNAL"; }
         var a = snap.ageSec();
         if (a < 0) { return "NO SIGNAL"; }
         if (a < STALE_AFTER_SEC) { return ""; }
-        if (a <= LOST_AFTER_SEC) { return "STALE " + shortDuration(a); }
-        return "LOST " + shortDuration(a);
+        var d = coarse ? coarseDuration(a) : shortDuration(a);
+        return (a <= LOST_AFTER_SEC ? "STALE " : "LOST ") + d;
     }
 }
