@@ -1,0 +1,4 @@
+# Simulator-only build: same code as a watch-app so the simulator opens the
+# full view directly instead of the glance loop, plus the :sim demo cycler.
+project.manifest = manifest-sim.xml
+base.excludeAnnotations = nosim
