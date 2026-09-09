@@ -34,6 +34,18 @@ void enter(State s) {
     g_since_ms = millis();
 }
 
+// The state machine can see that the link went away but not why, and the
+// difference matters: 200 is BEACON_TIMEOUT (the board stopped hearing the AP,
+// which on a congested 2.4GHz channel happens at any RSSI), 8 is ASSOC_LEAVE
+// (the AP threw it off), 15 is a 4-way handshake timeout. Diagnosing a silent
+// NO SIGNAL without this number means guessing.
+void on_sta_disconnected(WiFiEvent_t, WiFiEventInfo_t info) {
+    const uint8_t* b = info.wifi_sta_disconnected.bssid;
+    Serial.printf("claudeboy: sta disconnected, reason %u, from %02x:%02x:%02x:%02x:%02x:%02x\n",
+                  (unsigned)info.wifi_sta_disconnected.reason,
+                  b[0], b[1], b[2], b[3], b[4], b[5]);
+}
+
 bool associate() {
     if (!WiFi.mode(WIFI_STA)) return false;
     WiFi.setAutoReconnect(false);   // this poll owns reconnection, so the states stay honest
@@ -47,10 +59,10 @@ void report_association() {
     // The two heap figures are the whole point of this build. ESP.getFreeHeap()
     // would flatter them by ~73KB of 32-bit-only IRAM that cannot back a
     // uint8_t[], so ask for the 8-bit-capable heap specifically.
-    Serial.printf("claudeboy: wifi linked, ip %u.%u.%u.%u, rssi %d dBm, "
+    Serial.printf("claudeboy: wifi linked, ip %u.%u.%u.%u, bssid %s, rssi %d dBm, "
                   "MALLOC_CAP_8BIT free %u bytes, largest block %u bytes\n",
                   (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3],
-                  (int)WiFi.RSSI(),
+                  WiFi.BSSIDstr().c_str(), (int)WiFi.RSSI(),
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
@@ -120,6 +132,8 @@ bool read_body(char* buf, size_t cap, size_t& out_len, int& status) {
 
 bool wifi_begin(uint32_t timeout_ms) {
     g_timeout_ms = timeout_ms;
+    WiFi.onEvent(on_sta_disconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
     if (!associate()) {
         enter(State::NoLink);
         return false;
