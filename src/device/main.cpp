@@ -12,7 +12,7 @@
 #include "core/store.h"
 #include "core/types.h"
 #include "core/view.h"
-#include "device/net.h"
+#include "device/xport.h"
 #include "device/touch.h"
 
 static TFT_eSPI tft;
@@ -26,10 +26,6 @@ static uint16_t g_line[cb::SCREEN_W];
 static uint16_t g_palette[256];   // rgb565 per intensity, built once in setup()
 
 static uint32_t g_frame = 0;
-
-// One association attempt. Longer than a healthy router needs, short enough
-// that a wrong password shows up as a state on the panel rather than a hang.
-static const uint32_t WIFI_TIMEOUT_MS = 15000;
 
 // The two parse arenas and the snapshot on screen. Static, because every
 // string cb::Provider hands the renderer is a bare pointer into one of these
@@ -55,20 +51,6 @@ static cb::ViewState g_view = cb::VIEW_INITIAL;
 // the needle reads "--" until two polls a few minutes apart have landed.
 static cb::BurnHistory g_burn;
 
-// Matching the agent, which polls OpenUsage on the same period. Faster would
-// only buy latency the source does not have.
-static const uint32_t POLL_MS = 60000;
-// A failed fetch is usually a transient one, and until the first success the
-// board has nothing on screen at all, so a failure is worth retrying well
-// inside the minute. Not much sooner, though: a fetch against a network that
-// is associated but going nowhere blocks the render loop until its timeouts
-// expire, and retrying on top of that would leave the panel frozen more than
-// it draws.
-static const uint32_t RETRY_MS = 15000;
-
-static uint32_t g_last_poll_ms = 0;
-static uint32_t g_poll_wait_ms = 0;   // 0, so the first poll goes out as soon as WiFi links
-
 // cb::render_frame() hands each finished row here instead of filling a second
 // canvas -- see core/frame.h for why post-processing stays off the
 // accumulator. The address window is set once per frame, so rows must arrive
@@ -89,59 +71,37 @@ static void print_heap(const char* when) {
 // uint32_t here even at the same width, hence the wrapper.
 static uint32_t now_us() { return static_cast<uint32_t>(micros()); }
 
-// One HTTPS GET, parsed and adopted, when one is due. Called between frames
-// and never inside one: the TLS handshake blocks for a second or two and the
-// panel simply holds its last finished frame across it.
+// One snapshot, parsed and adopted, whenever the transport has one. Called
+// between frames and never inside one: a WiFi fetch blocks for a second or two
+// and the panel simply holds its last finished frame across it.
 //
 // roll_window_forward() is deliberately not used here. It exists so a shelved
-// fixture still shows moving windows; a live resetsAt is already in the
-// future, and walking it forward would invent a window that has not happened.
+// fixture still shows moving windows; a live resetsAt is already in the future,
+// and walking it forward would invent a window that has not happened.
 static void poll_snapshot() {
-    if (!cbnet::wifi_connected()) return;
-    if (!cb::clock_elapsed(g_last_poll_ms, millis(), g_poll_wait_ms)) return;
-
     size_t len = 0;
-    int status = 0;
-    const uint32_t t0 = millis();
-    const bool got = cbnet::fetch_snapshot(g_body, sizeof g_body, len, status);
-    const uint32_t took_ms = millis() - t0;
+    if (!cbxport::take_snapshot(g_body, sizeof g_body, len)) return;
 
-    g_last_poll_ms = millis();
-    // A body that arrived but would not parse is a server-side problem, and
-    // hammering it every ten seconds would not fix it. Only a failed fetch
-    // retries early.
-    g_poll_wait_ms = got ? POLL_MS : RETRY_MS;
+    const cb::ParseResult r = cb::store_accept(g_store, g_body, len);
+    const int64_t served = cb::store_current(g_store).server_time_ms;
+    // Seeded from the reply that carried it, against the counter as it reads
+    // now: serverTime was stamped when it was sent, a few hundred milliseconds
+    // ago, so this runs a touch behind rather than ahead -- the safe direction
+    // for an age. A reply with no serverTime leaves the clock alone rather than
+    // throwing it back to 1970.
+    if (r == cb::ParseResult::Ok && served > 0) cb::clock_seed(g_clock, served, millis());
 
-    int parsed = -1;
-    if (got) {
-        const cb::ParseResult r = cb::store_accept(g_store, g_body, len);
-        parsed = (int)r;
-        const int64_t served = cb::store_current(g_store).server_time_ms;
-        // Seeded from the reply that carried it, against the counter as it
-        // reads now: serverTime was stamped when the Worker served, a few
-        // hundred milliseconds ago, so this runs a touch behind rather than
-        // ahead -- the safe direction for an age. A reply with no serverTime
-        // at all leaves the clock alone rather than throwing it back to 1970.
-        if (r == cb::ParseResult::Ok && served > 0) cb::clock_seed(g_clock, served, millis());
-
-        // Sampled against the server's clock, not millis(): a board that
-        // reboots would otherwise look like it consumed a day's tokens in a
-        // second. store_accept() only swaps the snapshot on Ok, so anything
-        // else leaves the history alone rather than sampling stale numbers.
-        if (r == cb::ParseResult::Ok) {
-            const cb::UsageSnapshot& s = cb::store_current(g_store);
-            const int64_t at = cb::clock_now(g_clock, millis());
-            if (at > 0 && s.providers && s.provider_count > 0)
-                cb::burn_observe(g_burn, at, cb::chart_total(s.providers[0], 1));
-        }
+    // Sampled against the server's clock, not millis(): a board that reboots
+    // would otherwise look like it consumed a day's tokens in a second.
+    if (r == cb::ParseResult::Ok) {
+        const cb::UsageSnapshot& s = cb::store_current(g_store);
+        const int64_t at = cb::clock_now(g_clock, millis());
+        if (at > 0 && s.providers && s.provider_count > 0)
+            cb::burn_observe(g_burn, at, cb::chart_total(s.providers[0], 1));
     }
 
-    // parse is a cb::ParseResult, or -1 when there was no body to parse. The
-    // heap figures are taken after the session came down, so they are what the
-    // next handshake will have to fit into.
-    Serial.printf("claudeboy: poll status=%d bytes=%u parse=%d took=%ums "
-                  "free=%u largest=%u\n",
-                  status, (unsigned)len, parsed, (unsigned)took_ms,
+    Serial.printf("claudeboy: snapshot bytes=%u parse=%d free=%u largest=%u\n",
+                  (unsigned)len, (int)r,
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
@@ -183,8 +143,8 @@ void setup() {
 
     // Last, and deliberately: the framebuffer already holds its contiguous run
     // and the panel is lit, so the screen has something to show while the
-    // radio associates. wifi_begin() does not block -- loop() drives it.
-    cbnet::wifi_begin(WIFI_TIMEOUT_MS);
+    // radio associates. begin() does not block -- loop() drives it.
+    cbxport::begin();
     print_heap("after wifi start");
 }
 
@@ -204,7 +164,7 @@ static void poll_touch(const cb::UsageSnapshot& snap) {
 }
 
 void loop() {
-    cbnet::wifi_poll();
+    cbxport::poll();
     poll_snapshot();
 
     const cb::EffectParams fx = cb::EffectParams::defaults();
@@ -259,7 +219,7 @@ void loop() {
                       "tok/h=%lld samples=%d touch=%d last=(%d,%d) view=%d/%s "
                       "free=%u largest=%u\n",
                       (unsigned)timing.render_us, (unsigned)timing.post_us,
-                      (unsigned)total_us, cbnet::wifi_status_text(),
+                      (unsigned)total_us, cbxport::status_text(),
                       (long long)tok, g_burn.count,
                       cbtouch::down() ? 1 : 0, rx, ry, g_view.provider,
                       g_view.page == cb::Page::Data ? "DATA" : "STAT",

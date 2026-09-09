@@ -6,6 +6,7 @@
 #include <WiFiClientSecure.h>
 
 #include "core/clock.h"
+#include "device/xport.h"
 #include "esp_heap_caps.h"
 
 #if !__has_include("device/secrets.h")
@@ -220,3 +221,57 @@ const char* wifi_status_text() {
 }
 
 }  // namespace cbnet
+
+namespace cbxport {
+namespace {
+
+// Matching the agent, which polls OpenUsage on the same period. Faster would
+// only buy latency the source does not have. These moved out of main.cpp: the
+// cadence is a property of the transport, and BLE has none at all.
+const uint32_t POLL_MS  = 60000;
+const uint32_t RETRY_MS = 15000;
+
+uint32_t g_last_poll_ms = 0;
+uint32_t g_wait_ms = 0;   // 0, so the first poll goes out as soon as WiFi links
+
+// One association attempt. Longer than a healthy router needs, short enough
+// that a wrong password shows up as a state on the panel rather than a hang.
+const uint32_t WIFI_TIMEOUT_MS = 15000;
+
+}  // namespace
+
+void begin() { cbnet::wifi_begin(WIFI_TIMEOUT_MS); }
+
+void poll() { cbnet::wifi_poll(); }
+
+bool take_snapshot(char* buf, size_t cap, size_t& len) {
+    len = 0;
+    if (!cbnet::wifi_connected()) return false;
+    if (!cb::clock_elapsed(g_last_poll_ms, millis(), g_wait_ms)) return false;
+
+    int status = 0;
+    const uint32_t t0 = millis();
+    const bool got = cbnet::fetch_snapshot(buf, cap, len, status);
+    const uint32_t took_ms = millis() - t0;
+
+    g_last_poll_ms = millis();
+    g_wait_ms = got ? POLL_MS : RETRY_MS;
+
+    // The transport logs its own failures, because only it knows what the
+    // numbers mean. The heap figures are taken after the session came down, so
+    // they are what the next handshake will have to fit into.
+    if (!got) {
+        Serial.printf("claudeboy: fetch failed status=%d took=%ums free=%u largest=%u\n",
+                      status, (unsigned)took_ms,
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        len = 0;
+        return false;
+    }
+    Serial.printf("claudeboy: fetched %u bytes in %ums\n", (unsigned)len, (unsigned)took_ms);
+    return true;
+}
+
+const char* status_text() { return cbnet::wifi_status_text(); }
+
+}  // namespace cbxport
