@@ -117,14 +117,17 @@ void begin() {
     server->setCallbacks(&g_server_cb);
 
     NimBLEService* service = server->createService(SERVICE_UUID);
-    // The other half of the contract with the Swift helper, alongside the UUIDs
-    // above: NIMBLE_PROPERTY::WRITE accepts Write Requests only. The central
-    // must write with response -- write-without-response is not permitted by
-    // this property and gets discarded silently, no callback and no log, so
-    // there is nothing on this side to debug from. That's deliberate, not a
-    // gap to close: with-response flow-controls the ~20-frame burst and
-    // guarantees the host task sees frames one at a time and in order, which
-    // is what the reassembler above depends on.
+    // The helper writes with response, and the Swift side is written that way
+    // deliberately -- but not because this property would refuse anything else.
+    // It would not: NimBLE merges WRITE and WRITE_NO_RSP into a single ATT
+    // permission bit (ble_gatts.c), the permission check never looks at which
+    // opcode arrived (ble_att_svr.c), and onWrite() fires either way. What
+    // with-response actually buys is pacing. A Write Request is confirmed and
+    // one in flight, so the twenty-odd frames of a payload arrive in order and
+    // one at a time, which is what the reassembler assumes. Write Commands can
+    // be dropped under controller buffer pressure, and a dropped DATA frame
+    // means the transfer never reaches its declared length -- not corruption,
+    // but a payload lost until the next START resets things.
     NimBLECharacteristic* snap = service->createCharacteristic(
         SNAPSHOT_UUID, NIMBLE_PROPERTY::WRITE);
     snap->setCallbacks(&g_char_cb);
