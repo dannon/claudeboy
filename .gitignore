@@ -11,3 +11,5 @@ src/device/secrets.h
 watch/bin/
 watch/resources/settings/properties.xml
 watch/source/Secrets.mc
+
+server/mac/claudeboy-ble
