@@ -16,15 +16,18 @@ XferResult reassemble_frame(Reassembler& r, const uint8_t* frame, size_t len, si
     if (!r.buf || !frame || len == 0) return XferResult::Malformed;
 
     if (frame[0] == XFER_START) {
-        if (len < 5) return XferResult::Malformed;
-        const uint32_t total = (uint32_t)frame[1] | ((uint32_t)frame[2] << 8) |
-                               ((uint32_t)frame[3] << 16) | ((uint32_t)frame[4] << 24);
         // A START always abandons whatever was in flight: the Mac only sends one
         // when it is starting over, and keeping the old bytes would splice two
-        // payloads together.
+        // payloads together. That includes a malformed START -- a malformed
+        // frame means the stream is desynchronised, and continuing to append
+        // to a possibly-misaligned transfer risks assembling something
+        // corrupt that still parses.
         r.active = false;
         r.received = 0;
         r.declared = 0;
+        if (len < 5) return XferResult::Malformed;
+        const uint32_t total = (uint32_t)frame[1] | ((uint32_t)frame[2] << 8) |
+                               ((uint32_t)frame[3] << 16) | ((uint32_t)frame[4] << 24);
         if (total == 0) return XferResult::Malformed;
         if (total > r.cap) return XferResult::TooLarge;
         r.declared = total;
@@ -36,7 +39,10 @@ XferResult reassemble_frame(Reassembler& r, const uint8_t* frame, size_t len, si
     if (!r.active) return XferResult::NoTransfer;
 
     const size_t n = len - 1;
-    if (r.received + n > r.declared) {
+    // received <= declared always holds here, so declared - received cannot
+    // underflow; written this way instead of received + n > declared so a
+    // huge caller-supplied n can't wrap the addition and slip past the check.
+    if (n > r.declared - r.received) {
         r.active = false;
         r.received = 0;
         return XferResult::Overflow;

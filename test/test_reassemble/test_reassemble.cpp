@@ -74,6 +74,48 @@ void test_a_payload_larger_than_the_buffer_is_refused(void) {
     TEST_ASSERT_EQUAL(cb::XferResult::TooLarge, cb::reassemble_frame(g_re, f, n, len));
 }
 
+void test_a_payload_exactly_the_buffer_size_is_accepted(void) {
+    static char p[sizeof g_buf];
+    memset(p, 'x', sizeof p);
+    size_t len = 0;
+    TEST_ASSERT_EQUAL(cb::XferResult::Complete, push_all(p, sizeof p, 244, len));
+    TEST_ASSERT_EQUAL(sizeof p, len);
+    TEST_ASSERT_EQUAL_MEMORY(p, g_buf, sizeof p);
+}
+
+void test_an_overflowed_transfer_does_not_wedge_the_reassembler(void) {
+    uint8_t f[64];
+    size_t len = 0;
+    size_t n = start_frame(f, 4);
+    cb::reassemble_frame(g_re, f, n, len);
+    n = data_frame(f, "toolong", 7);
+    TEST_ASSERT_EQUAL(cb::XferResult::Overflow, cb::reassemble_frame(g_re, f, n, len));
+    // The aborted transfer must be gone -- a DATA frame right after Overflow,
+    // with no new START in between, has nothing to append to. (A subsequent
+    // START would reset this state on its own, so this has to be checked
+    // before one arrives to actually exercise the Overflow branch's reset.)
+    n = data_frame(f, "x", 1);
+    TEST_ASSERT_EQUAL(cb::XferResult::NoTransfer, cb::reassemble_frame(g_re, f, n, len));
+    // A sane transfer right afterwards still works.
+    const char* p = "ok";
+    TEST_ASSERT_EQUAL(cb::XferResult::Complete, push_all(p, strlen(p), 4, len));
+    TEST_ASSERT_EQUAL(2, len);
+}
+
+void test_a_truncated_start_mid_transfer_abandons_it(void) {
+    uint8_t f[64];
+    size_t len = 0;
+    size_t n = start_frame(f, 10);
+    cb::reassemble_frame(g_re, f, n, len);
+    n = data_frame(f, "abc", 3);
+    TEST_ASSERT_EQUAL(cb::XferResult::NeedMore, cb::reassemble_frame(g_re, f, n, len));
+    f[0] = cb::XFER_START;   // truncated START: opcode only, no length bytes
+    TEST_ASSERT_EQUAL(cb::XferResult::Malformed, cb::reassemble_frame(g_re, f, 1, len));
+    // The partial transfer must be gone -- a following DATA frame has nothing to append to.
+    n = data_frame(f, "x", 1);
+    TEST_ASSERT_EQUAL(cb::XferResult::NoTransfer, cb::reassemble_frame(g_re, f, n, len));
+}
+
 void test_a_refused_start_does_not_wedge_the_reassembler(void) {
     uint8_t f[8];
     size_t len = 0;
@@ -140,8 +182,11 @@ int main(int, char**) {
     RUN_TEST(test_chunk_size_does_not_change_the_result);
     RUN_TEST(test_data_before_start_is_refused);
     RUN_TEST(test_a_payload_larger_than_the_buffer_is_refused);
+    RUN_TEST(test_a_payload_exactly_the_buffer_size_is_accepted);
     RUN_TEST(test_a_refused_start_does_not_wedge_the_reassembler);
+    RUN_TEST(test_an_overflowed_transfer_does_not_wedge_the_reassembler);
     RUN_TEST(test_a_second_start_abandons_the_partial_transfer);
+    RUN_TEST(test_a_truncated_start_mid_transfer_abandons_it);
     RUN_TEST(test_more_data_than_declared_is_refused);
     RUN_TEST(test_junk_is_refused);
     RUN_TEST(test_the_live_fixture_survives_a_round_trip);
