@@ -8,6 +8,14 @@ let snapshotUUID = CBUUID(string: "678C5468-AD9D-402F-A06E-267C729245F3")
 let XFER_START: UInt8 = 0x01
 let XFER_DATA: UInt8 = 0x02
 
+// The board's receive buffer -- must stay in step with g_rx in
+// src/device/ble.cpp and g_body in src/device/main.cpp. A payload bigger than
+// this makes the board's reassembler return TooLarge on the START frame and
+// silently discard the whole transfer (no NACK reaches the ATT write), so
+// send() has to refuse an oversized payload itself rather than trust
+// didWriteValueFor to notice.
+let boardCapacity = 6144
+
 // The agent connects here. There is no stdin under launchd, and a child process
 // spawned by the agent would not have Bluetooth permission -- see the spec.
 let socketPath = NSHomeDirectory() + "/Library/Application Support/claudeboy/ble.sock"
@@ -21,6 +29,14 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private let lock = NSLock()
 
     func start() {
+        // write() to a socket whose peer has already hung up raises SIGPIPE,
+        // and the default disposition kills the whole process -- there is no
+        // MSG_NOSIGNAL on Darwin to suppress it per-call. Task 7's agent
+        // connects and disconnects routinely, so a status emit() landing in
+        // that window must not take down the CoreBluetooth central and BLE
+        // link along with it. Ignoring the signal makes write() fail with
+        // EPIPE instead, which emit() below is written to tolerate.
+        signal(SIGPIPE, SIG_IGN)
         central = CBCentralManager(delegate: self, queue: nil)
         listenOnSocket()
     }
@@ -33,7 +49,17 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         print(line, terminator: "")
         fflush(stdout)
         lock.lock(); let fds = clients; lock.unlock()
-        for fd in fds { _ = line.withCString { write(fd, $0, strlen($0)) } }
+        var dead: [Int32] = []
+        for fd in fds {
+            // SIGPIPE is ignored (see start()), so a peer that's gone away
+            // makes this return -1/EPIPE rather than kill the process. Drop
+            // the fd instead of retrying it on every future emit.
+            let sent = line.withCString { write(fd, $0, strlen($0)) }
+            if sent < 0 { dead.append(fd) }
+        }
+        if !dead.isEmpty {
+            lock.lock(); clients.removeAll { dead.contains($0) }; lock.unlock()
+        }
     }
 
     private func listenOnSocket() {
@@ -68,7 +94,10 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         Thread {
             while true {
                 let c = accept(fd, nil, nil)
-                if c < 0 { continue }
+                if c < 0 {
+                    usleep(100_000)   // don't busy-spin a core on a persistent accept() failure
+                    continue
+                }
                 self.lock.lock(); self.clients.append(c); self.lock.unlock()
                 Thread { self.serve(c) }.start()
             }
@@ -76,20 +105,34 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     private func serve(_ fd: Int32) {
+        let maxLine = 65536
         var carry = Data()
         var buf = [UInt8](repeating: 0, count: 4096)
-        while true {
+        loop: while true {
             let n = read(fd, &buf, buf.count)
             if n <= 0 { break }
             carry.append(contentsOf: buf[0..<n])
             while let nl = carry.firstIndex(of: 0x0a) {
                 let line = carry.subdata(in: carry.startIndex..<nl)
                 carry = carry.subdata(in: (nl + 1)..<carry.endIndex)
-                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                      let snap = o["snapshot"],
+                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
+                    emit(["error": "unparseable JSON line"])
+                    continue
+                }
+                guard let snap = o["snapshot"],
                       let payload = try? JSONSerialization.data(withJSONObject: snap)
-                else { continue }
+                else {
+                    emit(["error": "line missing snapshot key"])
+                    continue
+                }
                 DispatchQueue.main.async { self.send(payload) }
+            }
+            // A client that never sends a newline would otherwise grow carry
+            // without bound.
+            if carry.count > maxLine {
+                emit(["error": "line exceeded \(maxLine) bytes, closing connection"])
+                carry.removeAll()
+                break loop
             }
         }
         lock.lock(); clients.removeAll { $0 == fd }; lock.unlock()
@@ -97,7 +140,14 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     private func send(_ body: Data) {
+        guard body.count <= boardCapacity else {
+            emit(["error": "payload of \(body.count) bytes exceeds board capacity of \(boardCapacity)"])
+            return
+        }
         guard let p = board, let c = snapshot else {
+            if pending != nil {
+                emit(["warning": "dropping previous pending snapshot: a new one arrived before the board was ready"])
+            }
             pending = body   // not connected yet; send it the moment we are
             return
         }
@@ -108,7 +158,12 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         // order and one at a time, which is what the reassembler assumes. A
         // dropped Write Command would leave a transfer short of its declared
         // length and cost a payload.
-        let room = max(20, p.maximumWriteValueLength(for: .withResponse) - 1)
+        //
+        // Each frame is one opcode byte (XFER_START/XFER_DATA) plus the
+        // chunk, so the chunk itself may only be up to maximumWriteValueLength
+        // minus that opcode byte -- never floored back up, or the frame would
+        // land one byte over the negotiated ceiling.
+        let room = max(1, p.maximumWriteValueLength(for: .withResponse) - 1)
 
         var start = Data([XFER_START])
         var total = UInt32(body.count).littleEndian
@@ -147,6 +202,15 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         emit(["state": "connected", "peripheral": p.identifier.uuidString])
         p.discoverServices([serviceUUID])
+    }
+
+    func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
+        // Without this, a connect that fails on the first try (board briefly
+        // out of range, radio busy) leaves scanning stopped forever and the
+        // helper wedges silently.
+        emit(["error": "failed to connect: \(error?.localizedDescription ?? "unknown")"])
+        board = nil
+        c.scanForPeripherals(withServices: [serviceUUID])
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral,
