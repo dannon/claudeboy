@@ -19,6 +19,12 @@ const char* SNAPSHOT_UUID = "678c5468-ad9d-402f-a06e-267c729245f3";
 // The reassembly buffer is ours, not the caller's: writes arrive on the NimBLE
 // host task at whatever moment the Mac chooses, and main.cpp's g_body is being
 // parsed on the Arduino loop. take_snapshot() copies across the boundary.
+//
+// Sized to match main.cpp's g_body (also 6144) -- nothing in the build enforces
+// that the two agree, so the n == 0 || n > cap check below is defence, not dead
+// code: if they ever diverge, a smaller g_rx makes the reassembler hand back
+// TooLarge on the oversized START, and a larger g_rx trips that check instead.
+// Either way the mismatch fails gracefully rather than overrunning a buffer.
 char g_rx[6144];
 cb::Reassembler g_re;
 
@@ -35,18 +41,23 @@ cb::Reassembler g_re;
 std::atomic<bool> g_ready{false};
 size_t g_ready_len = 0;   // published by the release store below; read after the acquire load
 
-bool g_connected = false;
+// Written on the BLE host task, read on the Arduino loop, same cross-core split
+// as g_ready above -- so this gets the same std::atomic treatment for the same
+// reason a plain bool would not do. Unlike g_ready it orders nothing else: it
+// is one aligned byte with a single writer, consumed only to render the status
+// string, so relaxed is the right memory order on both the load and the store.
+std::atomic<bool> g_connected{false};
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* s) override {
-        g_connected = true;
+        g_connected.store(true, std::memory_order_relaxed);
         Serial.println("claudeboy: ble central connected");
         // Keep advertising off while connected -- one central is the whole
         // design, and a second would have nothing to say.
         (void)s;
     }
     void onDisconnect(NimBLEServer* s) override {
-        g_connected = false;
+        g_connected.store(false, std::memory_order_relaxed);
         cb::reassemble_init(g_re, g_rx, sizeof g_rx);   // drop any partial transfer
         Serial.println("claudeboy: ble central disconnected, advertising again");
         s->startAdvertising();
@@ -73,6 +84,14 @@ class SnapshotCallbacks : public NimBLECharacteristicCallbacks {
                 break;
             case cb::XferResult::NeedMore:
                 break;
+            case cb::XferResult::NoTransfer:
+                // Expected, not anomalous: this is what every DATA frame of a
+                // transfer looks like once its START has been dropped by the
+                // g_ready guard above. Logging it would mean a blocking
+                // Serial.printf per frame -- ~20 of them at a negotiated MTU,
+                // closer to 185 without one -- from the NimBLE host task while
+                // it should be servicing the link. Stay quiet.
+                break;
             default:
                 Serial.printf("claudeboy: ble frame refused, result=%d, %u bytes\n",
                               (int)r, (unsigned)v.size());
@@ -98,6 +117,14 @@ void begin() {
     server->setCallbacks(&g_server_cb);
 
     NimBLEService* service = server->createService(SERVICE_UUID);
+    // The other half of the contract with the Swift helper, alongside the UUIDs
+    // above: NIMBLE_PROPERTY::WRITE accepts Write Requests only. The central
+    // must write with response -- write-without-response is not permitted by
+    // this property and gets discarded silently, no callback and no log, so
+    // there is nothing on this side to debug from. That's deliberate, not a
+    // gap to close: with-response flow-controls the ~20-frame burst and
+    // guarantees the host task sees frames one at a time and in order, which
+    // is what the reassembler above depends on.
     NimBLECharacteristic* snap = service->createCharacteristic(
         SNAPSHOT_UUID, NIMBLE_PROPERTY::WRITE);
     snap->setCallbacks(&g_char_cb);
@@ -136,6 +163,8 @@ bool take_snapshot(char* buf, size_t cap, size_t& len) {
     return true;
 }
 
-const char* status_text() { return g_connected ? "BLE LINKED" : "BLE ADVERTISING"; }
+const char* status_text() {
+    return g_connected.load(std::memory_order_relaxed) ? "BLE LINKED" : "BLE ADVERTISING";
+}
 
 }  // namespace cbxport
