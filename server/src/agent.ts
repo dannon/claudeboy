@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformOpenUsage } from './transform.ts';
+import { startBleSink } from './ble-sink.ts';
 
 export type PollOutcome = 'pushed' | 'unchanged' | 'source-unavailable' | 'push-failed';
 
@@ -10,6 +11,8 @@ export interface AgentConfig {
   pushToken: string;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
+  /** Optional BLE sink. Absent means the board is on the WiFi firmware. */
+  bleSink?: { send(json: string): void };
 }
 
 export interface AgentState {
@@ -115,6 +118,11 @@ export async function pollOnce(
   }
   state.quietPolls = 0;
 
+  // The board first, and unconditionally: it is on the desk over BLE and should
+  // not wait on a round trip to Cloudflare for a number the Mac already has. A
+  // failure here is logged inside the sink and never thrown.
+  config.bleSink?.send(json);
+
   try {
     const response = await doFetch(config.pushUrl, {
       method: 'POST',
@@ -162,6 +170,12 @@ async function main(): Promise<void> {
   };
   const intervalMs = intervalMsFromEnv(process.env['CLAUDEBOY_INTERVAL_SEC'], config.log!);
   const state: AgentState = { lastPushedJson: null };
+
+  const blePath = process.env['CLAUDEBOY_BLE_SOCKET'];
+  if (blePath) {
+    config.bleSink = startBleSink({ socketPath: blePath, log: config.log! });
+    config.log!(`ble sink enabled on ${blePath}`);
+  }
 
   config.log!(`claudeboy agent starting, polling every ${intervalMs / 1000}s`);
   for (;;) {
