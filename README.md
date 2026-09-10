@@ -92,9 +92,54 @@ Timestamps on the wire are epoch seconds, not milliseconds, because Monkey C's `
     cp src/device/secrets.h.example src/device/secrets.h  # then fill it in
     pio run -e cyd -t upload && pio device monitor
 
+The board has two firmwares from one tree. `-e cyd` fetches over WiFi and HTTPS
+from the Worker; `-e cyd-ble` takes the same payload over BLE from the MacBook and
+does not link the WiFi or TLS stacks at all. Measured on hardware: RAM 65,348 against the
+WiFi build's 70,608, flash 659,513 against 982,265, and no 33,434-byte mbedtls session
+allocation per handshake -- which is what used to drive the largest free block down to 34,804
+and made TLS a tight fit.
+
+    pio run -e cyd-ble -t upload      # the desk build, fed by the Mac agent
+    cd server/mac && make             # the CoreBluetooth helper
+
 The board is an ESP32-2432S028R, the "Cheap Yellow Display". Two settings in
 `platformio.ini` look wrong and are not: the two-USB-port revision ships an ST7789, not the
 ILI9341 the listing claims, and the CH340 bridge fails above 115200 baud.
+
+### Installing the BLE path on the Mac
+
+The helper runs as **its own launchd job**, never as a child of the agent. macOS attributes
+Bluetooth permission to the responsible process, so a helper spawned by node is denied
+silently -- `centralManagerDidUpdateState` never fires and no prompt appears at all. Run
+directly by launchd it gets its own grant and prompts once.
+
+    cd server/mac && make
+    sed "s|/Users/CHANGEME|$HOME|" \
+      server/launchd/com.dannonbaker.claudeboy-ble.plist.example \
+      > ~/Library/LaunchAgents/com.dannonbaker.claudeboy-ble.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dannonbaker.claudeboy-ble.plist
+
+**Be at the keyboard for the first connection.** The board's characteristic demands an
+encrypted link, so macOS raises a "ClaudeBoy" pairing alert -- and it times out in about
+thirty seconds. Miss it and pairing fails with nothing obvious to show for it: the helper logs
+`{"error":"Authentication is insufficient."}` for every frame, and the only direct evidence is
+`SMP timeout ... status=4827` under `log show --predicate 'process == "bluetoothd"'`. Click
+**Pair**. This is one-time -- the bond lives in the `nvs` partition, which `-t upload` never
+touches. Only `erase_flash` clears it, and then you pair again.
+
+Finally, point the always-on agent at the helper's socket, in the agent's own launchd plist:
+
+    /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:CLAUDEBOY_BLE_SOCKET string \
+      '$HOME/Library/Application Support/claudeboy/ble.sock'" \
+      ~/Library/LaunchAgents/com.dannonbaker.claudeboy-agent.plist
+    launchctl bootout gui/$(id -u)/com.dannonbaker.claudeboy-agent
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dannonbaker.claudeboy-agent.plist
+
+Without that variable the agent still runs and still feeds the watch through the Worker. It
+simply never writes to the board, which looks exactly like the board having died.
+
+To check it is working, read `/tmp/claudeboy-ble.log`. A healthy transfer ends in
+`{"wrote":N}`; a refused one ends in `{"failed":N}` with `{"error":...}` lines above it.
 
 **Server**: `cd server && npm install && npm test`. Deploying, and the launchd agent, are in
 its README.
