@@ -45,6 +45,22 @@ describe('ble sink', () => {
     expect(lines.some((l) => l.includes('4608'))).toBe(true);
   });
 
+  it('reassembles a status line split across two data events', () => {
+    const { sock } = fakeSocket();
+    const connect = vi.fn(() => sock);
+    const lines: string[] = [];
+    startBleSink({ socketPath: '/x/ble.sock', log: (m) => lines.push(m), connectImpl: connect as any });
+    const firstHalf = '{"state":"re';
+    const secondHalf = 'ady","mtu":512}';
+    sock.emit('data', firstHalf);
+    expect(lines).toHaveLength(0);
+    sock.emit('data', `${secondHalf}\n`);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!).toBe(`ble helper: ${firstHalf}${secondHalf}`);
+    expect(lines.some((l) => l === `ble helper: ${firstHalf}`)).toBe(false);
+    expect(lines.some((l) => l === `ble helper: ${secondHalf}`)).toBe(false);
+  });
+
   it('reconnects after the socket closes', async () => {
     const { sock } = fakeSocket();
     const connect = vi.fn(() => sock);
