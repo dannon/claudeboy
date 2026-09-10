@@ -113,6 +113,14 @@ void begin() {
     // last transport failed for want of link margin, so take the maximum.
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
 
+    // Just-works bonding: no display and no keyboard on this board, so there is
+    // no PIN to compare and MITM protection is not on offer. What it does buy is
+    // an encrypted link bound to one central -- which is what lets the read token
+    // stay out of this firmware entirely. The bond lives in NVS, so erase_flash
+    // means pairing again.
+    NimBLEDevice::setSecurityAuth(true, false, true);   // bond, no MITM, secure connections
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+
     NimBLEServer* server = NimBLEDevice::createServer();
     server->setCallbacks(&g_server_cb);
 
@@ -129,7 +137,7 @@ void begin() {
     // means the transfer never reaches its declared length -- not corruption,
     // but a payload lost until the next START resets things.
     NimBLECharacteristic* snap = service->createCharacteristic(
-        SNAPSHOT_UUID, NIMBLE_PROPERTY::WRITE);
+        SNAPSHOT_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC);
     snap->setCallbacks(&g_char_cb);
     service->start();
 
