@@ -25,6 +25,13 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var board: CBPeripheral?
     private var snapshot: CBCharacteristic?
     private var pending: Data?
+    // Tracks the one transfer send() currently has in flight, so the
+    // eventual {"wrote"}/{"failed"} line reflects what the board actually
+    // took rather than what CoreBluetooth was merely handed. All three are
+    // touched only from the main queue (see the note on send() below).
+    private var outstandingWrites = 0
+    private var transferSize = 0
+    private var transferFailed = false
     private var clients: [Int32] = []
     private let lock = NSLock()
 
@@ -144,11 +151,14 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             emit(["error": "payload of \(body.count) bytes exceeds board capacity of \(boardCapacity)"])
             return
         }
-        guard let p = board, let c = snapshot else {
+        // outstandingWrites == 0 rules out both "not connected yet" and "a
+        // transfer is already in flight" -- both get the same treatment: stash
+        // this one in pending and send it the moment the board can take it.
+        guard let p = board, let c = snapshot, outstandingWrites == 0 else {
             if pending != nil {
                 emit(["warning": "dropping previous pending snapshot: a new one arrived before the board was ready"])
             }
-            pending = body   // not connected yet; send it the moment we are
+            pending = body
             return
         }
         // .withResponse throughout, and not incidentally -- though not
@@ -165,6 +175,17 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         // land one byte over the negotiated ceiling.
         let room = max(1, p.maximumWriteValueLength(for: .withResponse) - 1)
 
+        // One START frame plus ceil(body.count / room) DATA frames -- has to
+        // match the write loop below exactly, frame for frame, since
+        // didWriteValueFor counts writes down from this to know when the
+        // whole transfer has resolved. body.count == 0 yields 0 DATA frames
+        // here (integer division floors (room - 1) / room to 0), which is
+        // also what the loop below does since off < body.count never holds.
+        let dataFrames = (body.count + room - 1) / room
+        outstandingWrites = 1 + dataFrames
+        transferSize = body.count
+        transferFailed = false
+
         var start = Data([XFER_START])
         var total = UInt32(body.count).littleEndian
         withUnsafeBytes(of: &total) { start.append(contentsOf: $0) }
@@ -178,7 +199,6 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             p.writeValue(frame, for: c, type: .withResponse)
             off += take
         }
-        emit(["wrote": body.count])
     }
 
     func centralManagerDidUpdateState(_ c: CBCentralManager) {
@@ -217,6 +237,15 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                         error: Error?) {
         emit(["state": "disconnected"])
         snapshot = nil
+        // A disconnect mid-transfer means didWriteValueFor will never fire for
+        // the frames still in flight, so outstandingWrites would otherwise
+        // never reach zero and the helper would never report on this transfer
+        // again. Report the failure now and clear the count so the next send()
+        // starts clean.
+        if outstandingWrites != 0 {
+            emit(["failed": transferSize])
+            outstandingWrites = 0
+        }
         c.scanForPeripherals(withServices: [serviceUUID])
     }
 
@@ -233,7 +262,27 @@ final class Helper: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) {
-        if let e = error { emit(["error": e.localizedDescription]) }
+        if let e = error {
+            transferFailed = true
+            emit(["error": e.localizedDescription])
+        }
+        // Guards a stray callback arriving after didDisconnectPeripheral has
+        // already zeroed this out and reported the transfer as failed --
+        // without this, decrementing further would go negative and a later
+        // transfer could reach zero (and report) too early.
+        guard outstandingWrites > 0 else { return }
+        outstandingWrites -= 1
+        guard outstandingWrites == 0 else { return }
+
+        emit(transferFailed ? ["failed": transferSize] : ["wrote": transferSize])
+
+        // Take pending out before sending it, so a send() that immediately
+        // overlaps (outstandingWrites just got set again) stashes into a
+        // fresh pending rather than looping back into this one.
+        if let body = pending {
+            pending = nil
+            send(body)
+        }
     }
 }
 
