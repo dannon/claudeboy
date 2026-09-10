@@ -52,14 +52,18 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* s) override {
         g_connected.store(true, std::memory_order_relaxed);
         Serial.println("claudeboy: ble central connected");
-        // Keep advertising off while connected -- one central is the whole
-        // design, and a second would have nothing to say.
-        (void)s;
+        // Nothing to do here: the NimBLE controller stops connectable
+        // advertising on connection by itself. One central is the whole
+        // design, and a second would have nothing to say anyway.
     }
     void onDisconnect(NimBLEServer* s) override {
         g_connected.store(false, std::memory_order_relaxed);
         cb::reassemble_init(g_re, g_rx, sizeof g_rx);   // drop any partial transfer
         Serial.println("claudeboy: ble central disconnected, advertising again");
+        // Belt and braces, not load-bearing: NimBLEServer::m_advertiseOnDisconnect
+        // defaults true, and NimBLEServer calls startAdvertising() itself right
+        // after this callback returns. This call is a no-op today, kept in case
+        // that default ever changes under us.
         s->startAdvertising();
     }
 };
