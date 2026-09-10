@@ -70,7 +70,18 @@ export function startBleSink(opts: BleSinkOptions): BleSink {
         return;
       }
       try {
-        sock.write(`${JSON.stringify({ snapshot: JSON.parse(json) })}\n`);
+        // PushBody carries no serverTime -- that's Snapshot's field, stamped by
+        // worker.ts at serve time for the WiFi client. This sink is the BLE
+        // client's equivalent serve point, so it has to do the same stamping;
+        // nothing upstream of here (agent.ts, the Swift helper) ever will. Skip
+        // this and clock_seed() in main.cpp never fires (it's gated on
+        // served > 0), so the board's clock stays at zero forever: age clamps
+        // to 0, freshness_of() reads Fresh permanently -- no dimming, no STALE,
+        // no SIGNAL LOST -- and the burn needle sticks at "--" since
+        // burn_observe() is gated on at > 0. A dead pipeline would look
+        // identical to a healthy one.
+        const snapshot = { ...JSON.parse(json), serverTime: Math.floor(Date.now() / 1000) };
+        sock.write(`${JSON.stringify({ snapshot })}\n`);
       } catch (e) {
         opts.log(`ble helper: write failed (${e instanceof Error ? e.message : e})`);
       }

@@ -17,10 +17,31 @@ describe('ble sink', () => {
     const connect = vi.fn(() => sock);
     const sink = startBleSink({ socketPath: '/x/ble.sock', log: () => {}, connectImpl: connect as any });
     sock.emit('connect');
-    sink.send('{"serverTime":1,"providers":[]}');
+    const pushBody = { providers: [], utcOffsetSec: -14400 };
+    sink.send(JSON.stringify(pushBody));
     expect(writes).toHaveLength(1);
     expect(writes[0]!.endsWith('\n')).toBe(true);
-    expect(JSON.parse(writes[0]!)).toEqual({ snapshot: { serverTime: 1, providers: [] } });
+    const { snapshot } = JSON.parse(writes[0]!);
+    expect(snapshot.providers).toEqual([]);
+    expect(snapshot.utcOffsetSec).toBe(-14400);
+  });
+
+  it('stamps a plausible serverTime on a PushBody that arrives without one', () => {
+    const { sock, writes } = fakeSocket();
+    const connect = vi.fn(() => sock);
+    const sink = startBleSink({ socketPath: '/x/ble.sock', log: () => {}, connectImpl: connect as any });
+    sock.emit('connect');
+    const pushBody = { providers: [], utcOffsetSec: -14400 };
+    const before = Math.floor(Date.now() / 1000);
+    sink.send(JSON.stringify(pushBody));
+    const after = Math.floor(Date.now() / 1000);
+    const { snapshot } = JSON.parse(writes[0]!);
+    expect(typeof snapshot.serverTime).toBe('number');
+    expect(snapshot.serverTime).toBeGreaterThanOrEqual(before);
+    expect(snapshot.serverTime).toBeLessThanOrEqual(after + 2);
+    // The rest of the body survives unchanged.
+    expect(snapshot.providers).toEqual(pushBody.providers);
+    expect(snapshot.utcOffsetSec).toBe(pushBody.utcOffsetSec);
   });
 
   it('drops sends while disconnected rather than queueing them', () => {
