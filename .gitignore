@@ -13,3 +13,7 @@ watch/resources/settings/properties.xml
 watch/source/Secrets.mc
 
 server/mac/claudeboy-ble
+
+# emscripten output; `make -C web` rebuilds it
+web/claudeboy.mjs
+web/claudeboy.wasm
