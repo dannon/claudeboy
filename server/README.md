@@ -16,6 +16,7 @@ field name.
 | `src/shape.ts` | trims the payload per client |
 | `src/worker.ts` | the Cloudflare Worker: two routes, two tokens, KV between them |
 | `src/agent.ts` | the Mac side: poll, dedupe, push |
+| `src/web-server.ts` | the agent's optional loopback server for the PWA |
 | `fixtures/` | a live OpenUsage capture and the golden it transforms into |
 
 ## Running the tests
@@ -51,6 +52,24 @@ every `.ts` file here is checked by one or the other.
     launchctl load ~/Library/LaunchAgents/com.dannonbaker.claudeboy-agent.plist
 
 Logs land in `/tmp/claudeboy-agent.log`.
+
+## The PWA
+
+`../web/` is the board's own renderer compiled to WebAssembly: the same core, the
+same pixels (`node web/test-golden.mjs` holds it to the goldens), a tap on the
+glass doing what a tap on the panel does. The agent serves it when
+`CLAUDEBOY_WEB_PORT` is set, along with a `/v1/snapshot` answered from its own
+last reading -- no Worker round trip and no token in the browser.
+
+    cd ../web && make                    # needs emscripten: brew install emscripten
+    # add CLAUDEBOY_WEB_PORT (and CLAUDEBOY_WEB_TRUSTED_USER) to the plist, reload it
+    tailscale serve --bg --https=8443 http://127.0.0.1:6737
+
+The listener is loopback only, so `tailscale serve` is the one way in, and it
+supplies the HTTPS a service worker needs. With `CLAUDEBOY_WEB_TRUSTED_USER`
+set, `/v1/snapshot` also wants the `Tailscale-User-Login` header that serve
+adds, so a direct `curl localhost:6737/v1/snapshot` gets a 403 by design. Port
+8443 keeps the root of 443 free for Collie's front door on the same machine.
 
 ## Things that will bite you
 

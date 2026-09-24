@@ -2,6 +2,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformOpenUsage } from './transform.ts';
 import { startBleSink } from './ble-sink.ts';
+import { createWebHandler, startWebServer } from './web-server.ts';
+import type { PushBody } from './schema.ts';
 
 export type PollOutcome = 'pushed' | 'unchanged' | 'source-unavailable' | 'push-failed';
 
@@ -13,6 +15,12 @@ export interface AgentConfig {
   log?: (message: string) => void;
   /** Optional BLE sink. Absent means the board is on the WiFi firmware. */
   bleSink?: { send(json: string): void };
+  /**
+   * Every usable reading, before deduplication and whether or not the push
+   * lands: the local PWA reads from here, and should not go stale because
+   * Cloudflare did.
+   */
+  onSnapshot?: (body: PushBody) => void;
 }
 
 export interface AgentState {
@@ -104,6 +112,7 @@ export async function pollOnce(
     log('openusage returned no usable providers; keeping the last snapshot');
     return 'source-unavailable';
   }
+  config.onSnapshot?.(body);
 
   const json = JSON.stringify(body);
   if (json === state.lastPushedJson) {
@@ -175,6 +184,18 @@ async function main(): Promise<void> {
   if (blePath) {
     config.bleSink = startBleSink({ socketPath: blePath, log: config.log! });
     config.log!(`ble sink enabled on ${blePath}`);
+  }
+
+  const webPort = process.env['CLAUDEBOY_WEB_PORT'];
+  if (webPort) {
+    const web = createWebHandler({
+      root: process.env['CLAUDEBOY_WEB_ROOT']
+        ?? fileURLToPath(new URL('../../web', import.meta.url)),
+      trustedUser: process.env['CLAUDEBOY_WEB_TRUSTED_USER'] || undefined,
+    });
+    config.onSnapshot = (body) => web.update(body);
+    // Loopback only: `tailscale serve` is the front door, as it is for Collie.
+    startWebServer(web, { host: '127.0.0.1', port: Number(webPort), log: config.log! });
   }
 
   config.log!(`claudeboy agent starting, polling every ${intervalMs / 1000}s`);

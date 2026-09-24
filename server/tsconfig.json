@@ -17,10 +17,10 @@
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts"],
-  // agent.ts and ble-sink.ts are Mac-side code, not Worker code: they need
+  // agent.ts, ble-sink.ts and web-server.ts are Mac-side code, not Worker code: they need
   // node:path, node:url, node:net and process. Typing them here would mean
   // node-typing the whole project and losing the guard above, so they are
   // checked by test/tsconfig.json instead, which already pulls in
   // ../src/**/*.ts with node types. `npm run typecheck` runs both projects.
-  "exclude": ["src/agent.ts", "src/ble-sink.ts"]
+  "exclude": ["src/agent.ts", "src/ble-sink.ts", "src/web-server.ts"]
 }

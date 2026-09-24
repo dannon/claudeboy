@@ -28,6 +28,11 @@
     <string>REPLACE_WITH_PUSH_TOKEN</string>
     <key>CLAUDEBOY_INTERVAL_SEC</key>
     <string>60</string>
+    <!-- Optional: serve the PWA on loopback for `tailscale serve`. See README. -->
+    <key>CLAUDEBOY_WEB_PORT</key>
+    <string>6737</string>
+    <key>CLAUDEBOY_WEB_TRUSTED_USER</key>
+    <string>REPLACE_WITH_TAILSCALE_LOGIN</string>
   </dict>
 
   <key>RunAtLoad</key>

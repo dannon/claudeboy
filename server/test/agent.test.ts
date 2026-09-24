@@ -213,3 +213,39 @@ describe('quiet heartbeat', () => {
     expect(state.quietPolls).toBe(0);
   });
 });
+
+describe('onSnapshot', () => {
+  beforeEach(() => { pushes = []; state = { lastPushedJson: null }; });
+
+  it('sees every reading, including the ones deduplication skips', async () => {
+    const seen: number[] = [];
+    const config = makeConfig({ onSnapshot: (b) => seen.push(b.providers.length) });
+    await pollOnce(config, state);
+    await pollOnce(config, state);
+    expect(pushes.length).toBe(1);
+    expect(seen.length).toBe(2);
+  });
+
+  it('still sees the reading when the push fails', async () => {
+    let seen = 0;
+    const config = makeConfig({ onSnapshot: () => { seen++; } });
+    config.fetchImpl = async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      return url.includes('/v1/usage')
+        ? new Response(rawUsage, { status: 200 })
+        : new Response(null, { status: 500 });
+    };
+    expect(await pollOnce(config, state)).toBe('push-failed');
+    expect(seen).toBe(1);
+  });
+
+  it('is not called when OpenUsage is down', async () => {
+    let seen = 0;
+    const config = makeConfig({
+      onSnapshot: () => { seen++; },
+      usageResponse: () => new Response(null, { status: 502 }),
+    });
+    expect(await pollOnce(config, state)).toBe('source-unavailable');
+    expect(seen).toBe(0);
+  });
+});
